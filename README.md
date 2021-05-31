@@ -1,2 +1,2 @@
 # LLLang
-A linear logic based language.
+A linear logic based programming language.

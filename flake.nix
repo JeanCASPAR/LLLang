@@ -1,5 +1,5 @@
 {
-  description = "";
+  description = "A linear logic based programming language.";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs";
