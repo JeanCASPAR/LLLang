@@ -3,6 +3,7 @@
 
 module Parser (Parser) where
 
+import AST
 import Control.Applicative.Combinators hiding (many, some)
 import Control.Monad.Combinators.Expr
 import Data.Functor (($>))
@@ -14,8 +15,6 @@ import qualified Text.Megaparsec.Char.Lexer as L
 
 type Parser = Parsec String Text
 
-type Ident = String
-
 parseIdent :: Parser Ident
 parseIdent =
   do
@@ -23,28 +22,12 @@ parseIdent =
     rest <- many alphaNumChar
     return (firstLetter : rest)
 
-data Type
-  = Named Ident
-  | With Type Type
-  | Plus Type Type
-  | Tensor Type Type
-  | Par Type Type
-  | WhyNot Type
-  | OfCourse Type
-  | Fun Type Type
-  | Zero
-  | One
-  | Top
-  | Bottom
-  | Forall Ident Type -- forall a. A
-  | Exists Ident Type -- exists a. A
-
 typeOperators :: [[Operator Parser Type]]
 typeOperators =
-  [ [prefix "!" OfCourse, prefix "?" WhyNot],
-    [binary "&" With, binary "(+)" Plus, binary "(x)" Tensor, binary "|" Par],
-    [binary "-°" Fun],
-    [quantifier "forall" Forall, quantifier "exists" Exists]
+  [ [prefix "!" TOfCourse, prefix "?" TWhyNot],
+    [binary "&" TWith, binary "(+)" TPlus, binary "(x)" TTensor, binary "|" TPar],
+    [binary "-°" TFun],
+    [quantifier "forall" TForall, quantifier "exists" TExists]
   ]
   where
     singleUnaryOp :: Text -> (Type -> Type) -> Parser (Type -> Type)
@@ -74,12 +57,12 @@ typeParser =
     parens = between (symbol "(") (symbol ")")
     term =
       choice
-        [ symbol "1" $> One,
-          symbol "0" $> Zero,
-          symbol "T" $> Top,
-          symbol "B" $> Bottom,
+        [ symbol "1" $> TOne,
+          symbol "0" $> TZero,
+          symbol "T" $> TTop,
+          symbol "B" $> TBottom,
           parens typeParser,
-          Named <$> parseIdent
+          TNamed <$> parseIdent
         ]
 
 data TypeDecl = MkTypeDecl
