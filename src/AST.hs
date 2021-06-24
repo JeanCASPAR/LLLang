@@ -79,7 +79,7 @@ activeNames (SExpr (OfCourse x p)) =
   filter (`notElem` x) $ activeNames $ SProofExpr p
 -}
 
--- add L if False, add R if True, to all idents in the expression
+-- add L if False, add R if True, to all Idents in the expression
 ren :: Bool -> SyntacticExpr -> SyntacticExpr
 ren b (SProofExpr (ProofExpr theta t)) =
   SProofExpr $ ProofExpr
@@ -95,8 +95,8 @@ ren b (SExpr (Var name)) =
     SExpr . Var . L $ name
   else
     SExpr . Var . R $ name
-ren b (SExpr Unit) = SExpr Unit
-ren b (SExpr Perp) = SExpr Perp
+ren _ (SExpr Unit) = SExpr Unit
+ren _ (SExpr Perp) = SExpr Perp
 ren b (SExpr (Tensor t u)) =
   SExpr $ Tensor
     (extractExpr . ren b . SExpr $ t)
@@ -112,14 +112,14 @@ ren b (SExpr (Inr u)) =
 ren b (SExpr (With x p q)) =
   SExpr $ With
     (fmap (\name ->
-      let SExpr (Var name) = ren b . SExpr . Var $ name
-      in name
+      let SExpr (Var name') = ren b . SExpr . Var $ name
+      in name'
     ) x)
     (extractProofExpr . ren b . SProofExpr $ p)
     (extractProofExpr . ren b . SProofExpr $ q)
 ren b (SExpr (WhyNot t)) =
   SExpr . WhyNot . extractExpr . ren b . SExpr $ t
-ren b (SExpr Empty) = SExpr Empty
+ren _ (SExpr Empty) = SExpr Empty
 ren b (SExpr (Concat t u)) =
   SExpr $ Concat
     (extractExpr . ren b . SExpr $ t)
@@ -127,59 +127,64 @@ ren b (SExpr (Concat t u)) =
 ren b (SExpr (OfCourse x p)) =
   SExpr $ OfCourse
     (fmap (\name ->
-      let SExpr (Var name) = ren b . SExpr . Var $ name
-      in name
+      let SExpr (Var name') = ren b . SExpr . Var $ name
+      in name'
     ) x)
     (extractProofExpr . ren b . SProofExpr $ p)
 
 extractExpr :: SyntacticExpr -> Expr
 extractExpr (SExpr e) = e
+extractExpr _ = undefined
+
 extractProofExpr :: SyntacticExpr -> ProofExpr
 extractProofExpr (SProofExpr p) = p
+extractProofExpr _ = undefined
+
 extractCoequation :: SyntacticExpr -> Coequation
 extractCoequation (SCoequation c) = c
+extractCoequation _ = undefined
 
 substitute :: Ident -> Expr -> SyntacticExpr -> SyntacticExpr
-substitute id var (SProofExpr (ProofExpr theta t)) =
+substitute idx var (SProofExpr (ProofExpr theta t)) =
   SProofExpr $ ProofExpr
-    (fmap (extractCoequation . substitute id var . SCoequation) theta)
-    (fmap (extractExpr . substitute id var . SExpr) t)
-substitute id var (SCoequation (Coequation t u)) =
+    (fmap (extractCoequation . substitute idx var . SCoequation) theta)
+    (fmap (extractExpr . substitute idx var . SExpr) t)
+substitute idx var (SCoequation (Coequation t u)) =
   SCoequation $ Coequation
-    (extractExpr . substitute id var . SExpr $ t)
-    (extractExpr . substitute id var . SExpr $ u)
-substitute id var (SExpr (Var name)) =
-  SExpr $ if id == name
+    (extractExpr . substitute idx var . SExpr $ t)
+    (extractExpr . substitute idx var . SExpr $ u)
+substitute idx var (SExpr (Var name)) =
+  SExpr $ if idx == name
     then var
     else Var name
-substitute id var (SExpr Unit) = SExpr Unit
-substitute id var (SExpr Perp) = SExpr Perp
-substitute id var (SExpr (Tensor t u)) =
+substitute _ _ (SExpr Unit) = SExpr Unit
+substitute _ _ (SExpr Perp) = SExpr Perp
+substitute idx var (SExpr (Tensor t u)) =
   SExpr $ Tensor
-    (extractExpr . substitute id var . SExpr $ t)
-    (extractExpr . substitute id var . SExpr $ u)
-substitute id var (SExpr (Par t u)) =
+    (extractExpr . substitute idx var . SExpr $ t)
+    (extractExpr . substitute idx var . SExpr $ u)
+substitute idx var (SExpr (Par t u)) =
   SExpr $ Par
-    (extractExpr . substitute id var . SExpr $ t)
-    (extractExpr . substitute id var . SExpr $ u)
-substitute id var (SExpr (Inl t)) =
-  SExpr . Inl . extractExpr . substitute id var . SExpr $ t
-substitute id var (SExpr (Inr u)) =
-  SExpr . Inr . extractExpr . substitute id var . SExpr $ u
-substitute id var (SExpr (With x p q)) =
-  if id `elem` x
+    (extractExpr . substitute idx var . SExpr $ t)
+    (extractExpr . substitute idx var . SExpr $ u)
+substitute idx var (SExpr (Inl t)) =
+  SExpr . Inl . extractExpr . substitute idx var . SExpr $ t
+substitute idx var (SExpr (Inr u)) =
+  SExpr . Inr . extractExpr . substitute idx var . SExpr $ u
+substitute idx var (SExpr (With x p q)) =
+  if idx `elem` x
   then SExpr $ With x p q
   else SExpr $ With x
-    (extractProofExpr . substitute id var . SProofExpr $ p)
-    (extractProofExpr . substitute id var . SProofExpr $ q)
-substitute id var (SExpr (WhyNot t)) =
-  SExpr . extractExpr . substitute id var . SExpr $ t
-substitute id var (SExpr (Concat t u)) =
+    (extractProofExpr . substitute idx var . SProofExpr $ p)
+    (extractProofExpr . substitute idx var . SProofExpr $ q)
+substitute idx var (SExpr (WhyNot t)) =
+  SExpr . extractExpr . substitute idx var . SExpr $ t
+substitute idx var (SExpr (Concat t u)) =
   SExpr $ Concat
-    (extractExpr . substitute id var . SExpr $ t)
-    (extractExpr . substitute id var . SExpr $ u)
-substitute id var (SExpr Empty) = SExpr Empty
-substitute id var (SExpr (OfCourse x p)) =
-  if id `elem` x
+    (extractExpr . substitute idx var . SExpr $ t)
+    (extractExpr . substitute idx var . SExpr $ u)
+substitute _ _ (SExpr Empty) = SExpr Empty
+substitute idx var (SExpr (OfCourse x p)) =
+  if idx `elem` x
   then SExpr $ OfCourse x p
-  else SExpr . OfCourse x . extractProofExpr . substitute id var . SProofExpr $ p
+  else SExpr . OfCourse x . extractProofExpr . substitute idx var . SProofExpr $ p

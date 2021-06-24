@@ -29,14 +29,14 @@ step (Interpreter (Coequation Perp Unit :<| h) ctx) = Interpreter h ctx
 step (Interpreter (Coequation (Tensor t u) (Par t' u') :<| h) ctx) = Interpreter (h :|> Coequation t t' :|> Coequation u u') ctx
 step (Interpreter (Coequation (Par t' u') (Tensor t u) :<| h) ctx) = Interpreter (h :|> Coequation t t' :|> Coequation u u') ctx
 -- Case Left
-step (Interpreter (Coequation (With x (ProofExpr theta (t : ts)) (ProofExpr ksi (u : us))) (Inl v) :<| h) ctx) =
+step (Interpreter (Coequation (With x (ProofExpr theta (t : ts)) (ProofExpr _ (_ : _))) (Inl v) :<| h) ctx) =
   Interpreter ((h >< S.fromList theta >< S.fromList (zipWith (Coequation . Var) x ts)) :|> Coequation t v) ctx
-step (Interpreter (Coequation (Inl v) (With x (ProofExpr theta (t : ts)) (ProofExpr ksi (u : us))) :<| h) ctx) =
+step (Interpreter (Coequation (Inl v) (With x (ProofExpr theta (t : ts)) (ProofExpr _ (_ : _))) :<| h) ctx) =
   Interpreter ((h >< S.fromList theta >< S.fromList (zipWith (Coequation . Var) x ts)) :|> Coequation t v) ctx
 -- Case Right
-step (Interpreter (Coequation (With x (ProofExpr theta (t : ts)) (ProofExpr ksi (u : us))) (Inr v) :<| h) ctx) =
+step (Interpreter (Coequation (With x (ProofExpr _ (_ : _)) (ProofExpr ksi (u : us))) (Inr v) :<| h) ctx) =
   Interpreter ((h >< S.fromList ksi >< S.fromList (zipWith (Coequation . Var) x us)) :|> Coequation u v) ctx
-step (Interpreter (Coequation (Inr v) (With x (ProofExpr theta (t : ts)) (ProofExpr ksi (u : us))) :<| h) ctx) =
+step (Interpreter (Coequation (Inr v) (With x (ProofExpr _ (_ : _)) (ProofExpr ksi (u : us))) :<| h) ctx) =
   Interpreter ((h >< S.fromList ksi >< S.fromList (zipWith (Coequation . Var) x us)) :|> Coequation u v) ctx
 -- Read
 step (Interpreter (Coequation (OfCourse x (ProofExpr theta (t : ts))) (WhyNot u) :<| h) ctx) =
@@ -44,20 +44,20 @@ step (Interpreter (Coequation (OfCourse x (ProofExpr theta (t : ts))) (WhyNot u)
 step (Interpreter (Coequation (WhyNot u) (OfCourse x (ProofExpr theta (t : ts))) :<| h) ctx) =
   Interpreter ((h >< S.fromList theta >< S.fromList (zipWith (Coequation . Var) x ts)) :|> Coequation t u) ctx
 -- Discard
-step (Interpreter (Coequation (OfCourse x p) AST.Empty :<| h) ctx) =
+step (Interpreter (Coequation (OfCourse x _) AST.Empty :<| h) ctx) =
   Interpreter (h >< S.fromList (fmap ((`Coequation` AST.Empty) . Var) x)) ctx
-step (Interpreter (Coequation AST.Empty (OfCourse x p) :<| h) ctx) =
+step (Interpreter (Coequation AST.Empty (OfCourse x _) :<| h) ctx) =
   Interpreter (h >< S.fromList (fmap ((`Coequation` AST.Empty) . Var) x)) ctx
 -- Copy
 step (Interpreter (Coequation (OfCourse x p) (Concat u v) :<| h) ctx) =
   Interpreter ((h >< S.fromList (zipWith (Coequation . Var) x 
-    (zipWith (\x y -> Concat (Var (L x)) (Var (R y))) x x)))
+    (zipWith (\a b -> Concat (Var (L a)) (Var (R b))) x x)))
     :|> Coequation (extractExpr . ren True . SExpr $ OfCourse x p) u
     :|> Coequation (extractExpr . ren False .SExpr $ OfCourse x p) v
   ) ctx
 step (Interpreter (Coequation (Concat u v) (OfCourse x p) :<| h) ctx) =
   Interpreter ((h >< S.fromList (zipWith (Coequation . Var) x 
-    (zipWith (\x y -> Concat (Var (L x)) (Var (R y))) x x)))
+    (zipWith (\a b -> Concat (Var (L a)) (Var (R b))) x x)))
     :|> Coequation (extractExpr . ren True . SExpr $ OfCourse x p) u
     :|> Coequation (extractExpr . ren False .SExpr $ OfCourse x p) v
   ) ctx
