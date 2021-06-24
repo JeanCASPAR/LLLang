@@ -13,9 +13,28 @@ import Text.Megaparsec
 import Text.Megaparsec.Char
 import qualified Text.Megaparsec.Char.Lexer as L
 
+type TIdent = String
+
+data Type
+  = TNamed TIdent
+  | TWith Type Type
+  | TPlus Type Type
+  | TTensor Type Type
+  | TPar Type Type
+  | TWhyNot Type
+  | TOfCourse Type
+  | TFun Type Type
+  | TZero
+  | TOne
+  | TTop
+  | TBottom
+  | TForall TIdent Type -- forall a. A
+  | TExists TIdent Type -- exists a. A
+  deriving Eq
+
 type Parser = Parsec String Text
 
-parseIdent :: Parser Ident
+parseIdent :: Parser TIdent
 parseIdent =
   do
     firstLetter <- letterChar
@@ -42,7 +61,7 @@ typeOperators =
     binary :: Text -> (Type -> Type -> Type) -> Operator Parser Type
     binary symbol = InfixL . (<$ L.symbol space symbol)
 
-    quantifier :: Text -> (Ident -> Type -> Type) -> Operator Parser Type
+    quantifier :: Text -> (TIdent -> Type -> Type) -> Operator Parser Type
     quantifier symbol kind = Prefix $ do
       L.symbol space1 symbol
       name <- parseIdent
@@ -66,25 +85,25 @@ typeParser =
         ]
 
 data TypeDecl = MkTypeDecl
-  { typeName :: Ident,
-    attrs :: Map Ident Type
+  { typeName :: TIdent,
+    attrs :: Map TIdent Type
   }
 
 data FunDecl = MkFunDecl
-  { funName :: Ident,
+  { funName :: TIdent,
     -- Idents are assumed to be unique in params
-    params :: [(Ident, Type)],
+    params :: [(TIdent, Type)],
     ret :: Type,
     code :: AST
   }
 
 data AST
-  = Let Ident (Maybe Type) AST
+  = Let TIdent (Maybe Type) AST
   | Call AST AST
   | Parenthesized AST
   | IntValue Int
   | BoolValue Bool
-  | NamedValue Ident
+  | NamedValue TIdent
 
 data Toplevel
   = Type TypeDecl
