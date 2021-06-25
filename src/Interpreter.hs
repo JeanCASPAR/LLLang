@@ -7,6 +7,7 @@ import qualified Data.Sequence as S
 import Data.Foldable (toList)
 
 data Interpreter = Interpreter (Seq Coequation) (H.HashMap Ident Expr)
+  deriving Eq
 
 step :: Interpreter -> Interpreter
 -- Communication
@@ -77,7 +78,8 @@ cleanup (ProofExpr [] ts) = ProofExpr [] ts
 
 -- Run the interpreter until the end of the evaluation
 run :: Interpreter -> Interpreter
-run (Interpreter theta ctx) = undefined
+run (Interpreter S.Empty ctx) = Interpreter S.Empty ctx
+run interpreter = run . step $ interpreter
 
 compute :: ProofExpr -> ProofExpr
 compute (ProofExpr theta t) =
