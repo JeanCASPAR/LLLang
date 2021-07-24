@@ -30,7 +30,7 @@ data Type
   | TBottom
   | TForall TIdent Type -- forall a. A
   | TExists TIdent Type -- exists a. A
-  deriving Eq
+  deriving (Eq)
 
 type Parser = Parsec String Text
 
@@ -63,9 +63,9 @@ typeOperators =
 
     quantifier :: Text -> (TIdent -> Type -> Type) -> Operator Parser Type
     quantifier symbol kind = Prefix $ do
-      L.symbol space1 symbol
+      _ <- L.symbol space1 symbol
       name <- parseIdent
-      L.symbol space "."
+      _ <- L.symbol space "."
       pure . kind $ name
 
 typeParser :: Parser Type
