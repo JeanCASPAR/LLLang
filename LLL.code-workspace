@@ -1,0 +1,10 @@
+{
+	"folders": [
+		{
+			"path": "."
+		}
+	],
+    "settings": {
+        "nixEnvSelector.nixFile": "${workspaceRoot}/flake.nix"
+    }
+}
