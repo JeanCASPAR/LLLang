@@ -1,0 +1,1 @@
+type X = /\ x. (µ a. (int -o x * a + a * x -o int));

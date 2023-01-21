@@ -1,0 +1,86 @@
+WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
+COMMENT = { "/*" ~ (COMMENT | ANY)* ~ "*/" }
+
+pos_integer = @{ ASCII_DIGIT ~ ("_" | ASCII_DIGIT)* }
+char_non_num = @{ ASCII_ALPHA | "_" }
+char = @{ ASCII_ALPHANUMERIC | "_" }
+ident = @{ ASCII_ALPHA | (char_non_num ~ char+) }
+neg_integer = @{ "-" ~ pos_integer }
+integer = @{ neg_integer | pos_integer }
+
+ty_int = { "int" }
+ty_var = { ident }
+ty_param = { ident ~ "<" ~ (type ~ ",")* ~ type? ~ ">" }
+ty_unit = { "()" }
+ty_never = { "!" }
+ty_atom = _{ ty_param | ty_int | ty_var | ty_unit | ty_never | "(" ~ type ~ ")" }
+ty_of_course = { "!" ~  ty_atom }
+ty_why_not = { "?" ~  ty_atom }
+ty_1 = _{ ty_of_course | ty_why_not | ty_atom }
+ty_tuple = { ty_1 ~ ("*" ~ ty_1)+ }
+ty_2 = _{ ty_tuple | ty_1 }
+ty_disj = { ty_2 ~ ("+" ~ ty_2)+ }
+ty_3 = _{ ty_disj | ty_2 }
+ty_impl = { ty_3 ~ ("-o" ~ ty_4) }
+ty_4 = _{ ty_impl | ty_3 }
+ty_mu = { "µ" ~ ty_var ~ "." ~ ty_5 }
+ty_forall = { "/\\" ~ ty_var ~ "." ~ ty_5 }
+ty_5 = _{ ty_mu | ty_forall | ty_4 }
+type = { ty_5 }
+
+e_var = { ident }
+e_int = { integer }
+e_unit = { "()" }
+e_atom = _{ e_var | e_int | e_unit | "(" ~ expr ~ ")" }
+e_param = { e_atom ~ "<" ~ (type ~ ",")* ~ type? ~ ">"}
+e_inj = { "inj" ~ type ~ integer ~ e_atom }
+e_unroll = { "unroll" ~ e_atom }
+e_roll = { "roll" ~ type ~ e_atom }
+e_app = { e_atom ~ e_1 }
+e_1 = _{ e_param | e_inj | e_unroll | e_roll | e_app }
+e_let = { "let" ~ pattern ~ "=" ~ expr ~ "in" ~ expr }
+e_2 = _{ e_let | e_1 }
+e_neg = { "-" ~ e_2 }
+e_3 = _{ e_neg | e_2 }
+e_mul = { e_3 ~ ("*" ~ e_4) }
+e_div = { e_3 ~ ("/" ~ e_4) }
+e_mod = { e_3 ~ ("%" ~ e_4) }
+e_4 = _{ e_mul | e_div | e_mod | e_3 }
+e_add = { e_4 ~ ("+" ~ e_5) }
+e_sub = { e_4 ~ ("-" ~ e_5) }
+e_5 = _{ e_add | e_sub | e_4 }
+e_eq = { e_5 ~ "=" ~ e_6 }
+e_lt = { e_5 ~ "<" ~ e_6 }
+e_6 = _{ e_eq | e_lt | e_5 }
+e_tuple = { e_6 ~ ("," ~ e_6)+ ~ ","? }
+e_7 = _{ e_tuple | e_6 }
+e_match = { "match" ~ e_8 ~ "{" ~
+    (pattern ~ "=>" ~ e_8 ~ ",")*
+    ~ "}" }
+e_8 = _{ e_match | e_7 }
+ret_ty = { type }
+e_fun = { "fun" ~ ("<" ~ (ty_var ~ ",")* ~ ty_var? ~ ">")? ~ 
+    ("(" ~ pattern ~ ":" ~ type ~ ")")+
+ ~ "-o" ~ ret_ty ~ ("{" ~ expr ~ "}" | expr) }
+e_rec_fun = { "rec" ~ ident ~ e_fun }
+e_9 = _{ e_rec_fun | e_fun | e_8 }
+expr = { e_9 }
+
+pat_discard = { "_" }
+pat_int = { integer }
+pat_var = { ident }
+pat_unit = { "()" }
+pat_atom = _{ pat_discard | pat_int | pat_var | pat_unit | "(" ~ pattern ~ ")" }
+pat_tuple = { pat_atom ~ ("," ~ pat_atom)+ ~ ","? }
+pat_1 = _{ pat_tuple | pat_atom }
+pat_inj = { "inj" ~ integer ~ pat_2 }
+pat_2 = _{ pat_inj | pat_1 }
+pattern = { pat_2 }
+
+def = { "def" ~ ident ~ ("<" ~  (ty_var ~ ",")* ~ ty_var? ~ ">")? ~ 
+    ("(" ~ pattern ~ ":" ~ type ~ ")")+ ~ "-o" ~ type ~ "{" ~ expr ~ "}" }
+rec_def = { "rec" ~ def }
+ty_def = { "type" ~ ident ~ "=" ~ type ~ ";"}
+
+item = _{ rec_def | def | ty_def }
+file = { SOI ~ item* ~ EOI }

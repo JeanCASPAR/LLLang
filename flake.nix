@@ -1,37 +1,57 @@
 {
-  description = "A linear logic based programming language.";
-
+  description = "LLLang";
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs";
-    flake-utils.url = "github:numtide/flake-utils";
+    nixpkgs.url = github:NixOS/nixpkgs/nixpkgs-unstable;
+    utils.url = github:numtide/flake-utils;
+    rust-overlay = {
+      url = github:oxalica/rust-overlay;
+      inputs = {
+        nixpkgs.follows = "nixpkgs";
+        flake-utils.follows = "utils";
+      };
+    };
+    naersk.url = github:nix-community/naersk;
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
-    flake-utils.lib.eachDefaultSystem (system:
+  outputs = { self, nixpkgs, utils, naersk, rust-overlay }:
+    utils.lib.eachDefaultSystem (system:
       let
-        pkgs = nixpkgs.legacyPackages.${system};
-
-        haskellPackages = pkgs.haskellPackages;
-
-        jailbreakUnbreak = pkg:
-          pkgs.haskell.lib.doJailbreak (pkg.overrideAttrs (_: { meta = { }; }));
-
-        packageName = "LLLang";
-      in {
-        packages.${packageName} =
-          haskellPackages.callCabal2nix packageName self rec {
-            # Dependency overrides go here
-          };
-
-        defaultPackage = self.packages.${system}.${packageName};
-
-        devShell = pkgs.mkShell {
-          buildInputs = with haskellPackages; [
-            haskell-language-server
-            ghcid
-            cabal-install
+        pkgs = import nixpkgs {
+          inherit system;
+          overlays = [
+            rust-overlay.overlays.default
           ];
-          inputsFrom = builtins.attrValues self.packages.${system};
+        };
+        rust = pkgs.rust-bin.stable.latest.default.override {
+          extensions = [ "rust-src" "clippy" ];
+        };
+        naerskLib = naersk.lib.${system}.override {
+          cargo = rust;
+          rustc = rust;
+        };
+        tex = pkgs.texlive.combine {
+          inherit (pkgs.texlive)
+          scheme-full;
+        };
+      in {
+        defaultPackage = naerskLib.buildPackage {
+          pname = "petitc";
+          root = ./.;
+        };
+        defaultApp = utils.lib.mkApp {
+          drv = self.defaultPackage.${system};
+        };
+        devShell = with pkgs; mkShell {
+          packages = [
+            gdb
+            rust
+            cargo
+            cargo-edit
+            rustfmt
+            rustPackages.clippy
+            rust-analyzer
+            tex
+          ];
         };
       });
 }

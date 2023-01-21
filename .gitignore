@@ -1,4 +1,4 @@
-/dist
-/dist-newstyle
+/target/*
 .*
 *.lock
+*.code-workspace
