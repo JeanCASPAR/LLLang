@@ -2,3 +2,11 @@
 .*
 *.lock
 *.code-workspace
+
+# LaTeX
+doc/*.aux
+doc/*.fdb_latexmk
+doc/*.fls
+doc/*.log
+doc/*.out
+doc/*.synctex.gz

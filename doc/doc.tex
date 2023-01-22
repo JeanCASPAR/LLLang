@@ -10,9 +10,61 @@
 \usepackage[french]{babel}
 \usepackage[babel=true]{microtype}
 \usepackage[colorlinks=true]{hyperref}
-\usepackage[outputdir=out, cache=false]{minted}
 \usepackage{xcolor}
 
 \begin{document}
+
+\section{Grammar}
+
+\begin{align*}
+    A, B, C, \dots \; ::= \;\;
+      & \verb?int?     \\
+    | & x              \\
+    | & x<A, B, \dots> \\
+    | & ()             \\
+    | & !              \\
+    | & !A             \\
+    | & ?A             \\
+    | & A * B * \dots  \\
+    | & A + B + \dots  \\
+    | & A \multimap B  \\
+    | & \mu x. A       \\
+    | & \forall x. A   \\
+\end{align*}
+
+\begin{align*}
+    P, Q, \dots \; ::= \;\;
+      & \_               \\
+    | & x                \\
+    | & n                \\
+    | & ()               \\
+    | & P, Q, \dots      \\
+    | & \verb?inj?\;n\;P \\
+\end{align*}
+
+\begin{align*}
+    e, f, g, \dots \; ::= \;\;
+      & x                                                                            \\
+    | & n                                                                            \\
+    | & ()                                                                           \\
+    | & e<A, B, \dots>                                                               \\
+    | & \verb?inj?\;A\;n\;e                                                          \\
+    | & \verb?unroll?\;e                                                             \\
+    | & \verb?roll?\;A\;e                                                            \\
+    | & e f                                                                          \\
+    | & \verb?let?\;P = e\;\verb?in?\;f                                              \\
+    | & -e                                                                           \\
+    | & e + f                                                                        \\
+    | & e - f                                                                        \\
+    | & e * f                                                                        \\
+    | & e / f                                                                        \\
+    | & e \% f                                                                       \\
+    | & e = f                                                                        \\
+    | & e < f                                                                        \\
+    | & e, f, \dots                                                                  \\
+    | & \verb?match?\;e \{ P \Rightarrow f, Q \Rightarrow g, \dots \}                \\
+    | & \verb?fun?<x, y, \dots>(P : A, Q : B, \dots) \multimap C \{ e \}             \\
+    | & \verb?rec?\;\verb?fun?<x, y, \dots>(P : A, Q : B, \dots) \multimap C \{ e \} \\
+\end{align*}
 
 \end{document}
