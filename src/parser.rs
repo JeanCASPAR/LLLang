@@ -37,6 +37,8 @@ pub enum BinOp {
     Mul,
     Div,
     Mod,
+    Eq,
+    Lt,
 }
 
 #[derive(Debug)]
@@ -476,7 +478,13 @@ impl<'a> LLLParser<'a> {
                 let e = self.parse_expr(e)?;
                 Ok(Expr::Neg(Box::new(e)))
             }
-            rule @ (Rule::e_add | Rule::e_sub | Rule::e_mul | Rule::e_div | Rule::e_mod) => {
+            rule @ (Rule::e_add
+            | Rule::e_sub
+            | Rule::e_mul
+            | Rule::e_div
+            | Rule::e_mod
+            | Rule::e_eq
+            | Rule::e_lt) => {
                 read!(e1, e2; parsed);
                 let e1 = self.parse_expr(e1)?;
                 let e2 = self.parse_expr(e2)?;
@@ -486,6 +494,8 @@ impl<'a> LLLParser<'a> {
                     Rule::e_mul => BinOp::Mul,
                     Rule::e_div => BinOp::Div,
                     Rule::e_mod => BinOp::Mod,
+                    Rule::e_eq => BinOp::Eq,
+                    Rule::e_lt => BinOp::Lt,
                     _ => unreachable!(),
                 };
                 Ok(Expr::BinOp(binop, Box::new(e1), Box::new(e2)))
