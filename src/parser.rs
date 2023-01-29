@@ -3,7 +3,7 @@ use pest_derive::Parser;
 
 use std::collections::HashMap;
 
-use crate::error::*;
+use crate::{ast::*, error::*};
 
 pub type Ident = usize;
 
@@ -15,82 +15,15 @@ pub struct LLLParser<'a> {
 }
 
 #[derive(Debug)]
-pub enum Type {
-    Int,
-    Ident(Ident),
-    Param(Ident, Vec<Type>),
-    Unit,
-    Never,
-    OfCourse(Box<Type>),
-    WhyNot(Box<Type>),
-    Tuple(Vec<Type>),
-    Sum(Vec<Type>),
-    Impl(Box<Type>, Box<Type>),
-    Mu(Ident, Box<Type>),
-    Forall(Ident, Box<Type>),
-}
+pub struct ParserStage;
 
-#[derive(Debug)]
-pub enum BinOp {
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Mod,
-    Eq,
-    Lt,
-}
-
-#[derive(Debug)]
-pub enum Expr {
-    Integer(isize),
-    Ident(Ident),
-    Param(Box<Expr>, Vec<Type>),
-    Unit,
-    Inj(Type, usize, Box<Expr>),
-    /// Roll(ty, •) : A[x := µx.A] -> µx.A
-    Roll(Type, Box<Expr>),
-    /// Unroll(•) :  µx.A -> A[x := µx.A]
-    Unroll(Box<Expr>),
-    App(Box<Expr>, Box<Expr>),
-    Let(Pattern, Box<Expr>, Box<Expr>),
-    Neg(Box<Expr>),
-    BinOp(BinOp, Box<Expr>, Box<Expr>),
-    Fun(Box<FunDef>),
-    Match(Box<Expr>, Vec<(Pattern, Expr)>),
-}
-
-#[derive(Debug)]
-pub enum Pattern {
-    Discard,
-    Int(isize),
-    Ident(Ident),
-    Unit,
-    Tuple(Vec<Pattern>),
-    Inj(usize, Box<Pattern>),
-}
-
-#[derive(Debug)]
-pub struct FunDef {
-    name: Option<Ident>,
-    ty_var: Vec<Ident>,
-    args: Vec<(Pattern, Type)>,
-    ret_ty: Type,
-    body: Expr,
-    rec: bool,
-}
-
-#[derive(Debug)]
-pub enum Item {
-    FunDef(FunDef),
-    TypeDef(Ident, Type),
-}
-
-#[derive(Debug)]
-pub struct File<'a> {
-    items: Vec<Item>,
-    idents: Vec<&'a str>,
-    reverse_idents: HashMap<&'a str, usize>,
+impl Annotation for ParserStage {
+    type Ident = GlobalLoc;
+    type Expr = GlobalLoc;
+    type Pattern = GlobalLoc;
+    type Type = GlobalLoc;
+    type FunDef = GlobalLoc;
+    type Item = GlobalLoc;
 }
 
 macro_rules! read {
@@ -139,7 +72,7 @@ impl<'a> LLLParser<'a> {
         }
     }
 
-    pub fn parse(self, data: &'a str) -> Result<File, Error> {
+    pub fn parse(self, data: &'a str) -> Result<File<ParserStage>, Error> {
         let mut parsed = <LLLParser as Parser<_>>::parse(Rule::file, data)?;
         let file = if let Some(pair) = parsed.next() {
             pair
@@ -157,17 +90,23 @@ impl<'a> LLLParser<'a> {
         self.parse_file(file)
     }
 
-    fn parse_ident(&mut self, parsed: Pair<'a, Rule>) -> Result<Ident, Error> {
+    fn parse_ident(
+        &mut self,
+        parsed: Pair<'a, Rule>,
+    ) -> Result<(Ident, <ParserStage as Annotation>::Ident), Error> {
         let span = parsed.as_span().into();
         let line_column = parsed.line_col().into();
         match parsed.as_rule() {
             Rule::ident => {
                 let ident = parsed.as_str();
                 let entry = self.reverse_idents.entry(ident);
-                Ok(*entry.or_insert_with(|| {
-                    self.idents.push(ident);
-                    self.idents.len() - 1
-                }))
+                Ok((
+                    *entry.or_insert_with(|| {
+                        self.idents.push(ident);
+                        self.idents.len() - 1
+                    }),
+                    GlobalLoc::new(span, line_column),
+                ))
             }
             rule => Err(ErrorType::from(ParseError::ExpectedRule(Rule::ident, rule))
                 .report(span, line_column)),
@@ -212,7 +151,7 @@ impl<'a> LLLParser<'a> {
         }
     }
 
-    fn parse_file(mut self, parsed: Pair<'a, Rule>) -> Result<File<'a>, Error> {
+    fn parse_file(mut self, parsed: Pair<'a, Rule>) -> Result<File<'a, ParserStage>, Error> {
         let span = parsed.as_span().into();
         let line_column = parsed.line_col().into();
         let file = if let Rule::file = parsed.as_rule() {
@@ -242,11 +181,16 @@ impl<'a> LLLParser<'a> {
         })
     }
 
-    fn parse_item(&mut self, parsed: Pair<'a, Rule>) -> Result<Item, Error> {
+    fn parse_item(
+        &mut self,
+        parsed: Pair<'a, Rule>,
+    ) -> Result<(Item<ParserStage>, <ParserStage as Annotation>::Item), Error> {
         let span = parsed.as_span().into();
         let line_column = parsed.line_col().into();
         match parsed.as_rule() {
-            Rule::def => self.parse_global_fun(parsed).map(Item::FunDef),
+            Rule::def => self
+                .parse_global_fun(parsed)
+                .map(|fun_def| (Item::FunDef(fun_def), GlobalLoc::new(span, line_column))),
             Rule::rec_def => {
                 read!(rec_def; parsed);
                 if !matches!(rec_def.as_rule(), Rule::def) {
@@ -257,66 +201,87 @@ impl<'a> LLLParser<'a> {
                     .report(span, line_column));
                 }
                 let mut fun_def = self.parse_global_fun(rec_def)?;
-                fun_def.rec = true;
-                Ok(Item::FunDef(fun_def))
+                fun_def.0.rec = true;
+                Ok((Item::FunDef(fun_def), GlobalLoc::new(span, line_column)))
             }
             Rule::ty_def => {
                 read!(ident, ty; parsed);
                 let ident = self.parse_ident(ident)?;
                 let ty = self.parse_type(ty)?;
-                Ok(Item::TypeDef(ident, ty))
+                Ok((Item::TypeDef(ident, ty), GlobalLoc::new(span, line_column)))
             }
             rule => Err(ErrorType::from(ParseError::ExpectedRule(Rule::item, rule))
                 .report(span, line_column)),
         }
     }
 
-    fn parse_type(&mut self, parsed: Pair<'a, Rule>) -> Result<Type, Error> {
+    fn parse_type(
+        &mut self,
+        parsed: Pair<'a, Rule>,
+    ) -> Result<(Type<ParserStage>, <ParserStage as Annotation>::Type), Error> {
         let span = parsed.as_span().into();
         let line_column = parsed.line_col().into();
         match parsed.as_rule() {
             Rule::ty_int => {
                 read!(parsed);
-                Ok(Type::Int)
+                Ok((Type::Int, GlobalLoc::new(span, line_column)))
             }
             Rule::ty_var => {
                 read!(var; parsed);
-                Ok(Type::Ident(self.parse_ident(var)?))
+                Ok((
+                    Type::Ident(self.parse_ident(var)?),
+                    GlobalLoc::new(span, line_column),
+                ))
             }
             Rule::ty_unit => {
                 read!(parsed);
-                Ok(Type::Unit)
+                Ok((Type::Unit, GlobalLoc::new(span, line_column)))
             }
             Rule::ty_never => {
                 read!(parsed);
-                Ok(Type::Never)
+                Ok((Type::Never, GlobalLoc::new(span, line_column)))
             }
             Rule::ty_impl => {
                 read!(lhs, rhs; parsed);
-                Ok(Type::Impl(
-                    Box::new(self.parse_type(lhs)?),
-                    Box::new(self.parse_type(rhs)?),
+                Ok((
+                    Type::Impl(
+                        Box::new(self.parse_type(lhs)?),
+                        Box::new(self.parse_type(rhs)?),
+                    ),
+                    GlobalLoc::new(span, line_column),
                 ))
             }
-            Rule::ty_tuple => Ok(Type::Tuple(
-                parsed
-                    .into_inner()
-                    .map(|pair| self.parse_type(pair))
-                    .collect::<Result<_, _>>()?,
+            Rule::ty_tuple => Ok((
+                Type::Tuple(
+                    parsed
+                        .into_inner()
+                        .map(|pair| self.parse_type(pair))
+                        .collect::<Result<_, _>>()?,
+                ),
+                GlobalLoc::new(span, line_column),
             )),
-            Rule::ty_disj => Ok(Type::Sum(
-                parsed
-                    .into_inner()
-                    .map(|pair| self.parse_type(pair))
-                    .collect::<Result<_, _>>()?,
+            Rule::ty_disj => Ok((
+                Type::Sum(
+                    parsed
+                        .into_inner()
+                        .map(|pair| self.parse_type(pair))
+                        .collect::<Result<_, _>>()?,
+                ),
+                GlobalLoc::new(span, line_column),
             )),
             Rule::ty_of_course => {
                 read!(ty; parsed);
-                Ok(Type::OfCourse(Box::new(self.parse_type(ty)?)))
+                Ok((
+                    Type::OfCourse(Box::new(self.parse_type(ty)?)),
+                    GlobalLoc::new(span, line_column),
+                ))
             }
             Rule::ty_why_not => {
                 read!(ty; parsed);
-                Ok(Type::WhyNot(Box::new(self.parse_type(ty)?)))
+                Ok((
+                    Type::WhyNot(Box::new(self.parse_type(ty)?)),
+                    GlobalLoc::new(span, line_column),
+                ))
             }
             Rule::ty_param => {
                 let mut pairs = parsed.into_inner();
@@ -330,21 +295,27 @@ impl<'a> LLLParser<'a> {
                 let params = pairs
                     .map(|arg| self.parse_type(arg))
                     .collect::<Result<_, _>>()?;
-                Ok(Type::Param(id, params))
+                Ok((Type::Param(id, params), GlobalLoc::new(span, line_column)))
             }
             Rule::ty_mu => {
                 read!(id, ty; parsed);
                 read!(id; id);
                 let id = self.parse_ident(id)?;
                 let ty = self.parse_type(ty)?;
-                Ok(Type::Mu(id, Box::new(ty)))
+                Ok((
+                    Type::Mu(id, Box::new(ty)),
+                    GlobalLoc::new(span, line_column),
+                ))
             }
             Rule::ty_forall => {
                 read!(id, ty; parsed);
                 read!(id; id);
                 let id = self.parse_ident(id)?;
                 let ty = self.parse_type(ty)?;
-                Ok(Type::Forall(id, Box::new(ty)))
+                Ok((
+                    Type::Forall(id, Box::new(ty)),
+                    GlobalLoc::new(span, line_column),
+                ))
             }
             Rule::r#type => {
                 read!(ty; parsed);
@@ -357,32 +328,44 @@ impl<'a> LLLParser<'a> {
         }
     }
 
-    fn parse_pattern(&mut self, parsed: Pair<'a, Rule>) -> Result<Pattern, Error> {
+    fn parse_pattern(
+        &mut self,
+        parsed: Pair<'a, Rule>,
+    ) -> Result<(Pattern<ParserStage>, <ParserStage as Annotation>::Pattern), Error> {
         let span = parsed.as_span().into();
         let line_column = parsed.line_col().into();
         match parsed.as_rule() {
-            Rule::pat_discard => Ok(Pattern::Discard),
+            Rule::pat_discard => Ok((Pattern::Discard, GlobalLoc::new(span, line_column))),
             Rule::pat_int => {
                 read!(integer; parsed);
-                Ok(Pattern::Int(self.parse_int(integer)?))
+                Ok((
+                    Pattern::Int(self.parse_int(integer)?),
+                    GlobalLoc::new(span, line_column),
+                ))
             }
             Rule::pat_var => {
                 read!(ident; parsed);
-                Ok(Pattern::Ident(self.parse_ident(ident)?))
+                Ok((
+                    Pattern::Ident(self.parse_ident(ident)?),
+                    GlobalLoc::new(span, line_column),
+                ))
             }
-            Rule::pat_unit => Ok(Pattern::Unit),
+            Rule::pat_unit => Ok((Pattern::Unit, GlobalLoc::new(span, line_column))),
             Rule::pat_tuple => {
                 let pairs = parsed.into_inner();
                 let params = pairs
                     .map(|arg| self.parse_pattern(arg))
                     .collect::<Result<_, _>>()?;
-                Ok(Pattern::Tuple(params))
+                Ok((Pattern::Tuple(params), GlobalLoc::new(span, line_column)))
             }
             Rule::pat_inj => {
                 read!(integer, pat; parsed);
-                Ok(Pattern::Inj(
-                    self.parse_int(integer)? as usize,
-                    Box::new(self.parse_pattern(pat)?),
+                Ok((
+                    Pattern::Inj(
+                        self.parse_int(integer)? as usize,
+                        Box::new(self.parse_pattern(pat)?),
+                    ),
+                    GlobalLoc::new(span, line_column),
                 ))
             }
             Rule::pattern => {
@@ -396,27 +379,39 @@ impl<'a> LLLParser<'a> {
         }
     }
 
-    fn parse_expr(&mut self, parsed: Pair<'a, Rule>) -> Result<Expr, Error> {
+    fn parse_expr(
+        &mut self,
+        parsed: Pair<'a, Rule>,
+    ) -> Result<(Expr<ParserStage>, <ParserStage as Annotation>::Expr), Error> {
         let span = parsed.as_span().into();
         let line_column = parsed.line_col().into();
         match parsed.as_rule() {
             Rule::e_int => {
                 read!(integer; parsed);
-                Ok(Expr::Integer(self.parse_int(integer)?))
+                Ok((
+                    Expr::Integer(self.parse_int(integer)?),
+                    GlobalLoc::new(span, line_column),
+                ))
             }
             Rule::e_var => {
                 read!(ident; parsed);
-                Ok(Expr::Ident(self.parse_ident(ident)?))
+                Ok((
+                    Expr::Ident(self.parse_ident(ident)?),
+                    GlobalLoc::new(span, line_column),
+                ))
             }
-            Rule::e_unit => Ok(Expr::Unit),
-            Rule::e_fun => Ok(Expr::Fun(Box::new(self.parse_local_fun(parsed)?))),
+            Rule::e_unit => Ok((Expr::Unit, GlobalLoc::new(span, line_column))),
+            Rule::e_fun => Ok((
+                Expr::Fun(Box::new(self.parse_local_fun(parsed)?)),
+                GlobalLoc::new(span, line_column),
+            )),
             Rule::e_rec_fun => {
                 read!(ident, fun; parsed);
                 let name = self.parse_ident(ident)?;
                 let mut fun = self.parse_local_fun(fun)?;
-                fun.name = Some(name);
-                fun.rec = true;
-                Ok(Expr::Fun(Box::new(fun)))
+                fun.0.name = Some(name);
+                fun.0.rec = true;
+                Ok((Expr::Fun(Box::new(fun)), GlobalLoc::new(span, line_column)))
             }
             Rule::e_param => {
                 let mut parsed = parsed.into_inner();
@@ -429,43 +424,58 @@ impl<'a> LLLParser<'a> {
                 let ty_var = parsed
                     .map(|pair| self.parse_type(pair))
                     .collect::<Result<_, _>>()?;
-                Ok(Expr::Param(Box::new(e), ty_var))
+                Ok((
+                    Expr::Param(Box::new(e), ty_var),
+                    GlobalLoc::new(span, line_column),
+                ))
             }
             Rule::e_inj => {
                 read!(ty, nb, e; parsed);
                 let ty = self.parse_type(ty)?;
                 let nb = self.parse_pos_int(nb)?;
                 let e = self.parse_expr(e)?;
-                Ok(Expr::Inj(ty, nb, Box::new(e)))
+                Ok((
+                    Expr::Inj(ty, nb, Box::new(e)),
+                    GlobalLoc::new(span, line_column),
+                ))
             }
             Rule::e_roll => {
                 read!(ty, e; parsed);
                 let ty = self.parse_type(ty)?;
                 let e = self.parse_expr(e)?;
-                Ok(Expr::Roll(ty, Box::new(e)))
+                Ok((
+                    Expr::Roll(ty, Box::new(e)),
+                    GlobalLoc::new(span, line_column),
+                ))
             }
             Rule::e_unroll => {
                 read!(e; parsed);
                 let e = self.parse_expr(e)?;
-                Ok(Expr::Unroll(Box::new(e)))
+                Ok((Expr::Unroll(Box::new(e)), GlobalLoc::new(span, line_column)))
             }
             Rule::e_app => {
                 read!(e1, e2; parsed);
                 let e1 = self.parse_expr(e1)?;
                 let e2 = self.parse_expr(e2)?;
-                Ok(Expr::App(Box::new(e1), Box::new(e2)))
+                Ok((
+                    Expr::App(Box::new(e1), Box::new(e2)),
+                    GlobalLoc::new(span, line_column),
+                ))
             }
             Rule::e_let => {
                 read!(pat, e1, e2; parsed);
                 let pat = self.parse_pattern(pat)?;
                 let e1 = self.parse_expr(e1)?;
                 let e2 = self.parse_expr(e2)?;
-                Ok(Expr::Let(pat, Box::new(e1), Box::new(e2)))
+                Ok((
+                    Expr::Let(pat, Box::new(e1), Box::new(e2)),
+                    GlobalLoc::new(span, line_column),
+                ))
             }
             Rule::e_neg => {
                 read!(e; parsed);
                 let e = self.parse_expr(e)?;
-                Ok(Expr::Neg(Box::new(e)))
+                Ok((Expr::Neg(Box::new(e)), GlobalLoc::new(span, line_column)))
             }
             rule @ (Rule::e_add
             | Rule::e_sub
@@ -487,7 +497,10 @@ impl<'a> LLLParser<'a> {
                     Rule::e_lt => BinOp::Lt,
                     _ => unreachable!(),
                 };
-                Ok(Expr::BinOp(binop, Box::new(e1), Box::new(e2)))
+                Ok((
+                    Expr::BinOp(binop, Box::new(e1), Box::new(e2)),
+                    GlobalLoc::new(span, line_column),
+                ))
             }
             Rule::e_match => {
                 let mut parsed = parsed.into_inner();
@@ -529,7 +542,10 @@ impl<'a> LLLParser<'a> {
                     return Err(ErrorType::from(ParseError::NotEnoughChild(Rule::e_match))
                         .report(span, line_column));
                 } else {
-                    Ok(Expr::Match(Box::new(matched), arms))
+                    Ok((
+                        Expr::Match(Box::new(matched), arms),
+                        GlobalLoc::new(span, line_column),
+                    ))
                 }
             }
             Rule::expr => {
@@ -541,7 +557,10 @@ impl<'a> LLLParser<'a> {
         }
     }
 
-    fn parse_fun(&mut self, parsed: Pairs<'a, Rule>) -> Result<FunDef, Error> {
+    fn parse_fun(
+        &mut self,
+        parsed: Pairs<'a, Rule>,
+    ) -> Result<(FunDef<ParserStage>, <ParserStage as Annotation>::FunDef), Error> {
         #[derive(Debug)]
         enum State {
             TypeVar,
@@ -591,7 +610,7 @@ impl<'a> LLLParser<'a> {
                         body,
                         rec: false,
                     };
-                    return Ok(fun_def);
+                    return Ok((fun_def, GlobalLoc::new(span, line_column)));
                 }
                 (rule, state) => {
                     return Err(ErrorType::from(ParseError::ExpectedRule(
@@ -611,7 +630,10 @@ impl<'a> LLLParser<'a> {
         unreachable!()
     }
 
-    fn parse_local_fun(&mut self, parsed: Pair<'a, Rule>) -> Result<FunDef, Error> {
+    fn parse_local_fun(
+        &mut self,
+        parsed: Pair<'a, Rule>,
+    ) -> Result<(FunDef<ParserStage>, <ParserStage as Annotation>::FunDef), Error> {
         let span = parsed.as_span().into();
         let line_column = parsed.line_col().into();
         if !matches!(parsed.as_rule(), Rule::e_fun) {
@@ -624,7 +646,10 @@ impl<'a> LLLParser<'a> {
         self.parse_fun(parsed.into_inner())
     }
 
-    fn parse_global_fun(&mut self, parsed: Pair<'a, Rule>) -> Result<FunDef, Error> {
+    fn parse_global_fun(
+        &mut self,
+        parsed: Pair<'a, Rule>,
+    ) -> Result<(FunDef<ParserStage>, <ParserStage as Annotation>::FunDef), Error> {
         let span = parsed.as_span().into();
         let line_column = parsed.line_col().into();
         if !matches!(parsed.as_rule(), Rule::def) {
@@ -644,7 +669,7 @@ impl<'a> LLLParser<'a> {
         };
 
         let mut fun_def = self.parse_fun(parsed)?;
-        fun_def.name = Some(name);
+        fun_def.0.name = Some(name);
         Ok(fun_def)
     }
 }

@@ -1,5 +1,6 @@
 #![deny(missing_debug_implementations)]
 
+mod ast;
 mod error;
 mod parser;
 

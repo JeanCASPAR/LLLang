@@ -4,7 +4,7 @@ use std::num::ParseIntError;
 
 use crate::parser::Rule;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum Loc<T> {
     Pos(T),
     Span(T, T),
@@ -22,11 +22,22 @@ impl<'a> From<(usize, usize)> for Loc<(usize, usize)> {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct GlobalLoc {
+    pos: Loc<usize>,
+    line_column: Loc<(usize, usize)>,
+}
+
+impl GlobalLoc {
+    pub fn new(pos: Loc<usize>, line_column: Loc<(usize, usize)>) -> Self {
+        Self { pos, line_column }
+    }
+}
+
 #[derive(Debug)]
 pub struct Error {
     error_type: ErrorType,
-    line_column: Loc<(usize, usize)>,
-    pos: Loc<usize>,
+    loc: GlobalLoc,
 }
 
 #[derive(Debug)]
@@ -39,8 +50,7 @@ impl ErrorType {
     pub fn report(self, pos: Loc<usize>, line_column: Loc<(usize, usize)>) -> Error {
         Error {
             error_type: self,
-            line_column,
-            pos,
+            loc: GlobalLoc { pos, line_column },
         }
     }
 }
@@ -63,8 +73,7 @@ impl From<pest::error::Error<Rule>> for Error {
         };
         Error {
             error_type: ErrorType::PestError(value),
-            line_column,
-            pos,
+            loc: GlobalLoc { pos, line_column },
         }
     }
 }
