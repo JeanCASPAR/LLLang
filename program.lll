@@ -1,1 +1,6 @@
-type X = /\ x. (µ a. (int -o x * a + a * x -o int));
+type A = (/\ x. µ y. (int * int + x * y)) -o !int -o !;
+type B = A<?A<()>>;
+
+rec def f<X, Y> (_ : int) (x, 2, (inj 3 ()): A) -o B {
+    ()
+}

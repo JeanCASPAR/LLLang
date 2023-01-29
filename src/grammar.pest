@@ -1,12 +1,11 @@
 WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
 COMMENT = { "/*" ~ (COMMENT | ANY)* ~ "*/" }
 
-pos_integer = @{ ASCII_DIGIT ~ ("_" | ASCII_DIGIT)* }
 char_non_num = @{ ASCII_ALPHA | "_" }
 char = @{ ASCII_ALPHANUMERIC | "_" }
 ident = @{ ASCII_ALPHA | (char_non_num ~ char+) }
-neg_integer = @{ "-" ~ pos_integer }
-integer = @{ neg_integer | pos_integer }
+pos_integer = @{ ASCII_DIGIT ~ ("_" | ASCII_DIGIT)* }
+integer = @{ "-"? ~ pos_integer }
 
 ty_int = { "int" }
 ty_var = { ident }
@@ -37,7 +36,7 @@ e_inj = { "inj" ~ type ~ integer ~ e_atom }
 e_unroll = { "unroll" ~ e_atom }
 e_roll = { "roll" ~ type ~ e_atom }
 e_app = { e_atom ~ e_1 }
-e_1 = _{ e_param | e_inj | e_unroll | e_roll | e_app }
+e_1 = _{ e_param | e_inj | e_unroll | e_roll | e_app | e_atom }
 e_let = { "let" ~ pattern ~ "=" ~ expr ~ "in" ~ expr }
 e_2 = _{ e_let | e_1 }
 e_neg = { "-" ~ e_2 }
@@ -78,7 +77,7 @@ pat_2 = _{ pat_inj | pat_1 }
 pattern = { pat_2 }
 
 def = { "def" ~ ident ~ ("<" ~  (ty_var ~ ",")* ~ ty_var? ~ ">")? ~ 
-    ("(" ~ pattern ~ ":" ~ type ~ ")")+ ~ "-o" ~ type ~ "{" ~ expr ~ "}" }
+    ("(" ~ pattern ~ ":" ~ type ~ ")")+ ~ "-o" ~ ret_ty ~ "{" ~ expr ~ "}" }
 rec_def = { "rec" ~ def }
 ty_def = { "type" ~ ident ~ "=" ~ type ~ ";"}
 

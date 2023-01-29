@@ -179,19 +179,12 @@ impl<'a> LLLParser<'a> {
         let line_column = parsed.line_col().into();
         match parsed.as_rule() {
             Rule::integer => {
-                read!(n; parsed);
-                match n.as_rule() {
-                    Rule::pos_integer => self.parse_pos_int(n).map(|n| n as _),
-                    Rule::neg_integer => {
-                        read!(m; n);
-                        let n = self.parse_pos_int(m)?;
-                        Ok(-(n as isize))
-                    }
-                    rule => Err(
-                        ErrorType::from(ParseError::ExpectedRule(Rule::pos_integer, rule))
-                            .report(span, line_column),
-                    ),
-                }
+                Ok(parsed
+                    .as_str()
+                    .parse()
+                    .map_err(|e: std::num::ParseIntError| {
+                        ErrorType::from(ParseError::from(e)).report(span, line_column)
+                    })?)
             }
             rule => Err(
                 ErrorType::from(ParseError::ExpectedRule(Rule::integer, rule))
@@ -204,7 +197,7 @@ impl<'a> LLLParser<'a> {
         let span = parsed.as_span().into();
         let line_column = parsed.line_col().into();
         match parsed.as_rule() {
-            Rule::pos_integer => {
+            Rule::integer => {
                 Ok(parsed
                     .as_str()
                     .parse()
@@ -253,10 +246,7 @@ impl<'a> LLLParser<'a> {
         let span = parsed.as_span().into();
         let line_column = parsed.line_col().into();
         match parsed.as_rule() {
-            Rule::def => {
-                read!(def; parsed);
-                self.parse_global_fun(def).map(Item::FunDef)
-            }
+            Rule::def => self.parse_global_fun(parsed).map(Item::FunDef),
             Rule::rec_def => {
                 read!(rec_def; parsed);
                 if !matches!(rec_def.as_rule(), Rule::def) {
@@ -266,8 +256,7 @@ impl<'a> LLLParser<'a> {
                     ))
                     .report(span, line_column));
                 }
-                read!(def; rec_def);
-                let mut fun_def = self.parse_global_fun(def)?;
+                let mut fun_def = self.parse_global_fun(rec_def)?;
                 fun_def.rec = true;
                 Ok(Item::FunDef(fun_def))
             }
@@ -553,6 +542,7 @@ impl<'a> LLLParser<'a> {
     }
 
     fn parse_fun(&mut self, parsed: Pairs<'a, Rule>) -> Result<FunDef, Error> {
+        #[derive(Debug)]
         enum State {
             TypeVar,
             Pattern,
@@ -656,5 +646,25 @@ impl<'a> LLLParser<'a> {
         let mut fun_def = self.parse_fun(parsed)?;
         fun_def.name = Some(name);
         Ok(fun_def)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    const PROG: &'static str = "
+type A = (/\\ x. µ y. (int * int + x * y)) -o !int -o !;
+type B = A<?A<()>>;
+
+rec def f<X, Y> (_ : int) (x, 2, (inj 3 ()): A) -o B {
+    ()
+}
+";
+
+    #[test]
+    fn test() -> Result<(), Error> {
+        let parser = LLLParser::new();
+        parser.parse(PROG).and(Ok(()))
     }
 }
