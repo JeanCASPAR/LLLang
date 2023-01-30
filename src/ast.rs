@@ -2,8 +2,6 @@
 
 use std::{collections::HashMap, fmt::Debug};
 
-pub type Ident = usize;
-
 pub trait Annotation {
     type Ident: Debug;
     type Expr: Debug;
@@ -16,8 +14,8 @@ pub trait Annotation {
 #[derive(Debug)]
 pub enum Type<A: Annotation> {
     Int,
-    Ident((Ident, A::Ident)),
-    Param((Ident, A::Ident), Vec<(Type<A>, A::Type)>),
+    Ident(A::Ident),
+    Param(A::Ident, Vec<(Type<A>, A::Type)>),
     Unit,
     Never,
     OfCourse(Box<(Type<A>, A::Type)>),
@@ -25,8 +23,8 @@ pub enum Type<A: Annotation> {
     Tuple(Vec<(Type<A>, A::Type)>),
     Sum(Vec<(Type<A>, A::Type)>),
     Impl(Box<(Type<A>, A::Type)>, Box<(Type<A>, A::Type)>),
-    Mu((Ident, A::Ident), Box<(Type<A>, A::Type)>),
-    Forall((Ident, A::Ident), Box<(Type<A>, A::Type)>),
+    Mu(A::Ident, Box<(Type<A>, A::Type)>),
+    Forall(A::Ident, Box<(Type<A>, A::Type)>),
 }
 
 #[derive(Debug)]
@@ -43,7 +41,7 @@ pub enum BinOp {
 #[derive(Debug)]
 pub enum Expr<A: Annotation> {
     Integer(isize),
-    Ident((Ident, A::Ident)),
+    Ident(A::Ident),
     Param(Box<(Expr<A>, A::Expr)>, Vec<(Type<A>, A::Type)>),
     Unit,
     Inj((Type<A>, A::Type), usize, Box<(Expr<A>, A::Expr)>),
@@ -70,7 +68,7 @@ pub enum Expr<A: Annotation> {
 pub enum Pattern<A: Annotation> {
     Discard,
     Int(isize),
-    Ident((Ident, A::Ident)),
+    Ident(A::Ident),
     Unit,
     Tuple(Vec<(Pattern<A>, A::Pattern)>),
     Inj(usize, Box<(Pattern<A>, A::Pattern)>),
@@ -78,8 +76,8 @@ pub enum Pattern<A: Annotation> {
 
 #[derive(Debug)]
 pub struct FunDef<A: Annotation> {
-    pub name: Option<(Ident, A::Ident)>,
-    pub ty_var: Vec<(Ident, A::Ident)>,
+    pub name: Option<A::Ident>,
+    pub ty_var: Vec<A::Ident>,
     pub args: Vec<((Pattern<A>, A::Pattern), (Type<A>, A::Type))>,
     pub ret_ty: (Type<A>, A::Type),
     pub body: (Expr<A>, A::Expr),
@@ -89,7 +87,7 @@ pub struct FunDef<A: Annotation> {
 #[derive(Debug)]
 pub enum Item<A: Annotation> {
     FunDef((FunDef<A>, A::FunDef)),
-    TypeDef((Ident, A::Ident), (Type<A>, A::Type)),
+    TypeDef(A::Ident, (Type<A>, A::Type)),
 }
 
 #[derive(Debug)]

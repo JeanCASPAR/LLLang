@@ -5,8 +5,6 @@ use std::collections::HashMap;
 
 use crate::{ast::*, error::*};
 
-pub type Ident = usize;
-
 #[derive(Parser, Debug)]
 #[grammar = "grammar.pest"]
 pub struct LLLParser<'a> {
@@ -15,10 +13,23 @@ pub struct LLLParser<'a> {
 }
 
 #[derive(Debug)]
+pub struct ParseIdent {
+    /// index in a global table
+    pub name: usize,
+    pub loc: GlobalLoc,
+}
+
+impl ParseIdent {
+    pub fn new(name: usize, loc: GlobalLoc) -> Self {
+        Self { name, loc }
+    }
+}
+
+#[derive(Debug)]
 pub struct ParserStage;
 
 impl Annotation for ParserStage {
-    type Ident = GlobalLoc;
+    type Ident = ParseIdent;
     type Expr = GlobalLoc;
     type Pattern = GlobalLoc;
     type Type = GlobalLoc;
@@ -93,14 +104,14 @@ impl<'a> LLLParser<'a> {
     fn parse_ident(
         &mut self,
         parsed: Pair<'a, Rule>,
-    ) -> Result<(Ident, <ParserStage as Annotation>::Ident), Error> {
+    ) -> Result<<ParserStage as Annotation>::Ident, Error> {
         let span = parsed.as_span().into();
         let line_column = parsed.line_col().into();
         match parsed.as_rule() {
             Rule::ident => {
                 let ident = parsed.as_str();
                 let entry = self.reverse_idents.entry(ident);
-                Ok((
+                Ok(ParseIdent::new(
                     *entry.or_insert_with(|| {
                         self.idents.push(ident);
                         self.idents.len() - 1
