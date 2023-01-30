@@ -2,6 +2,8 @@
 
 use scoped_stack::ScopedStack;
 
+use std::collections::{hash_map::Entry, HashMap};
+
 use crate::{ast::*, error::*, misc::*, parser::ParserStage};
 
 pub use crate::parser::ParseIdent;
@@ -174,8 +176,9 @@ impl TypeChecker {
     fn check_pattern(
         &self,
         (pattern, annotation): (Pattern<ParserStage>, <ParserStage as Annotation>::Pattern),
-        expected_type: &Type<ParserStage>,
+        expected_type: &Type<TypeCheckStage>,
         infallible: bool,
+        bindings: &mut HashMap<usize, (Type<TypeCheckStage>, GlobalLoc)>,
     ) -> Result<
         (
             Pattern<TypeCheckStage>,
@@ -202,7 +205,22 @@ impl TypeChecker {
                 };
                 Pattern::Int(n)
             }
-            Pattern::Ident(id) => Pattern::Ident(id),
+            Pattern::Ident(id) => {
+                match bindings.entry(id.name) {
+                    Entry::Occupied(e) => {
+                        let (_, loc) = e.remove();
+                        return Err(Error {
+                            error_type: TypeError::MultipleBindingPattern(id.name, loc).into(),
+                            loc: id.loc,
+                        });
+                    }
+                    Entry::Vacant(e) => {
+                        e.insert((expected_type.clone(), id.loc));
+                    }
+                }
+
+                Pattern::Ident(id)
+            }
             Pattern::Unit => {
                 if !matches!(expected_type, Type::Unit) {
                     return Err(Error {
@@ -240,7 +258,9 @@ impl TypeChecker {
                     subpatterns
                         .into_iter()
                         .zip(subtypes)
-                        .map(|(subpat, subty)| self.check_pattern(subpat, &subty.0, infallible))
+                        .map(|(subpat, subty)| {
+                            self.check_pattern(subpat, &subty.0, infallible, bindings)
+                        })
                         .collect::<Result<_, _>>()?,
                 )
             }
@@ -279,7 +299,7 @@ impl TypeChecker {
                 }
                 Pattern::Inj(
                     nb,
-                    Box::new(self.check_pattern(*pat, &subtypes[nb].0, infallible)?),
+                    Box::new(self.check_pattern(*pat, &subtypes[nb].0, infallible, bindings)?),
                 )
             }
         };

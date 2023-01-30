@@ -6,6 +6,7 @@ use crate::{
     ast::*,
     misc::*,
     parser::{ParserStage, Rule},
+    type_check::TypeCheckStage,
 };
 
 #[derive(Debug)]
@@ -80,6 +81,8 @@ pub enum TypeError {
     /// Type [ident] was expected of arity [second usize], not [third usize]
     ExpectedArity(usize, usize, usize),
     UnknownType(usize),
-    NonCompatibleType(Pattern<ParserStage>, Type<ParserStage>),
-    NonInfalliblePattern(Pattern<ParserStage>, Type<ParserStage>),
+    NonCompatibleType(Pattern<ParserStage>, Type<TypeCheckStage>),
+    NonInfalliblePattern(Pattern<ParserStage>, Type<TypeCheckStage>),
+    /// First binding and pos
+    MultipleBindingPattern(usize, GlobalLoc),
 }
