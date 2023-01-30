@@ -2,48 +2,22 @@ use pest::error::{InputLocation, LineColLocation};
 
 use std::num::ParseIntError;
 
-use crate::parser::Rule;
-
-#[derive(Debug, Clone, Copy)]
-pub enum Loc<T> {
-    Pos(T),
-    Span(T, T),
-}
-
-impl<'a> From<pest::Span<'a>> for Loc<usize> {
-    fn from(value: pest::Span) -> Self {
-        Loc::Span(value.start(), value.end())
-    }
-}
-
-impl<'a> From<(usize, usize)> for Loc<(usize, usize)> {
-    fn from(value: (usize, usize)) -> Self {
-        Loc::Pos(value)
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct GlobalLoc {
-    pos: Loc<usize>,
-    line_column: Loc<(usize, usize)>,
-}
-
-impl GlobalLoc {
-    pub fn new(pos: Loc<usize>, line_column: Loc<(usize, usize)>) -> Self {
-        Self { pos, line_column }
-    }
-}
+use crate::{
+    misc::*,
+    parser::{ParseIdent, Rule},
+};
 
 #[derive(Debug)]
 pub struct Error {
-    error_type: ErrorType,
-    loc: GlobalLoc,
+    pub error_type: ErrorType,
+    pub loc: GlobalLoc,
 }
 
 #[derive(Debug)]
 pub enum ErrorType {
     PestError(pest::error::Error<Rule>),
     ParseError(ParseError),
+    TypeError(TypeError),
 }
 
 impl ErrorType {
@@ -52,12 +26,6 @@ impl ErrorType {
             error_type: self,
             loc: GlobalLoc { pos, line_column },
         }
-    }
-}
-
-impl From<ParseError> for ErrorType {
-    fn from(value: ParseError) -> Self {
-        ErrorType::ParseError(value)
     }
 }
 
@@ -78,9 +46,22 @@ impl From<pest::error::Error<Rule>> for Error {
     }
 }
 
+impl From<ParseError> for ErrorType {
+    fn from(value: ParseError) -> Self {
+        ErrorType::ParseError(value)
+    }
+}
+
+impl From<TypeError> for ErrorType {
+    fn from(value: TypeError) -> Self {
+        ErrorType::TypeError(value)
+    }
+}
+
 #[derive(Debug)]
 pub enum ParseError {
     ParseInt(ParseIntError),
+    /// Expected [first rule], found [second rule]
     ExpectedRule(Rule, Rule),
     TooManyChild(Rule),
     NotEnoughChild(Rule),
@@ -90,4 +71,12 @@ impl From<ParseIntError> for ParseError {
     fn from(value: ParseIntError) -> Self {
         ParseError::ParseInt(value)
     }
+}
+
+#[derive(Debug)]
+pub enum TypeError {
+    TypeVarWithParam(usize),
+    /// Type [ident] was expected of arity [second usize], not [third usize]
+    ExpectedArity(usize, usize, usize),
+    UnknownType(usize),
 }

@@ -1,9 +1,9 @@
 use pest::{iterators::*, Parser};
 use pest_derive::Parser;
 
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Debug, hash::Hash};
 
-use crate::{ast::*, error::*};
+use crate::{ast::*, error::*, misc::*};
 
 #[derive(Parser, Debug)]
 #[grammar = "grammar.pest"]
@@ -12,7 +12,7 @@ pub struct LLLParser<'a> {
     reverse_idents: HashMap<&'a str, usize>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct ParseIdent {
     /// index in a global table
     pub name: usize,
@@ -30,6 +30,8 @@ pub struct ParserStage;
 
 impl Annotation for ParserStage {
     type Ident = ParseIdent;
+    type TypeVar = Never;
+    type QTypeVar = ParseIdent;
     type Expr = GlobalLoc;
     type Pattern = GlobalLoc;
     type Type = GlobalLoc;

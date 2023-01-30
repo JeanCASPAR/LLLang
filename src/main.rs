@@ -2,7 +2,9 @@
 
 mod ast;
 mod error;
+mod misc;
 mod parser;
+mod type_check;
 
 fn main() {
     let prog = include_str!("../program.lll");

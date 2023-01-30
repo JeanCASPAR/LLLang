@@ -1,9 +1,10 @@
-#![allow(dead_code)]
-
 use std::{collections::HashMap, fmt::Debug};
 
 pub trait Annotation {
     type Ident: Debug;
+    type TypeVar: Debug;
+    /// Q stands for "quantified"
+    type QTypeVar: Debug;
     type Expr: Debug;
     type Pattern: Debug;
     type Type: Debug;
@@ -15,6 +16,7 @@ pub trait Annotation {
 pub enum Type<A: Annotation> {
     Int,
     Ident(A::Ident),
+    TypeVar(A::TypeVar),
     Param(A::Ident, Vec<(Type<A>, A::Type)>),
     Unit,
     Never,
@@ -23,8 +25,8 @@ pub enum Type<A: Annotation> {
     Tuple(Vec<(Type<A>, A::Type)>),
     Sum(Vec<(Type<A>, A::Type)>),
     Impl(Box<(Type<A>, A::Type)>, Box<(Type<A>, A::Type)>),
-    Mu(A::Ident, Box<(Type<A>, A::Type)>),
-    Forall(A::Ident, Box<(Type<A>, A::Type)>),
+    Mu(A::QTypeVar, Box<(Type<A>, A::Type)>),
+    Forall(A::QTypeVar, Box<(Type<A>, A::Type)>),
 }
 
 #[derive(Debug)]
