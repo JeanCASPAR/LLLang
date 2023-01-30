@@ -305,4 +305,28 @@ impl TypeChecker {
         };
         Ok((pat, annotation))
     }
+
+    fn check_expr(
+        &self,
+        (expr, annotation): (Expr<ParserStage>, <ParserStage as Annotation>::Expr),
+        expected_type: &Type<TypeCheckStage>,
+        bindings: &mut HashMap<usize, Type<TypeCheckStage>>,
+    ) -> Result<(Expr<TypeCheckStage>, <TypeCheckStage as Annotation>::Expr), Error> {
+        let e = match expr {
+            Expr::Integer(_) => todo!(),
+            Expr::Ident(_) => todo!(),
+            Expr::Param(_, _) => todo!(),
+            Expr::Unit => todo!(),
+            Expr::Inj(_, _, _) => todo!(),
+            Expr::Roll(_, _) => todo!(),
+            Expr::Unroll(_) => todo!(),
+            Expr::App(_, _) => todo!(),
+            Expr::Let(_, _, _) => todo!(),
+            Expr::Neg(_) => todo!(),
+            Expr::BinOp(_, _, _) => todo!(),
+            Expr::Fun(_) => todo!(),
+            Expr::Match(_, _) => todo!(),
+        };
+        Ok((e, annotation))
+    }
 }
