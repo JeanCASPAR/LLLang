@@ -9,13 +9,13 @@ pub enum Loc<T> {
     Span(T, T),
 }
 
-impl<'a> From<pest::Span<'a>> for Loc<usize> {
+impl From<pest::Span<'_>> for Loc<usize> {
     fn from(value: pest::Span) -> Self {
         Loc::Span(value.start(), value.end())
     }
 }
 
-impl<'a> From<(usize, usize)> for Loc<(usize, usize)> {
+impl From<(usize, usize)> for Loc<(usize, usize)> {
     fn from(value: (usize, usize)) -> Self {
         Loc::Pos(value)
     }

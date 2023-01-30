@@ -88,10 +88,10 @@ impl TypeChecker {
 
     /// Same as check type, but take a parameter storing the
     /// type variables already encountered
-    fn real_check_type<'b>(
+    fn real_check_type(
         &self,
         (ty, annotation): (Type<ParserStage>, <ParserStage as Annotation>::Type),
-        name_map: &'b mut ScopedStack<usize, (usize, GlobalLoc)>,
+        name_map: &'_ mut ScopedStack<usize, (usize, GlobalLoc)>,
         level: usize,
     ) -> Result<(Type<TypeCheckStage>, <TypeCheckStage as Annotation>::Type), Error> {
         name_map.push_scope();

@@ -554,12 +554,11 @@ impl<'a> LLLParser<'a> {
                 if last_pattern.is_none() {
                     return Err(ErrorType::from(ParseError::NotEnoughChild(Rule::e_match))
                         .report(span, line_column));
-                } else {
-                    Ok((
-                        Expr::Match(Box::new(matched), arms),
-                        GlobalLoc::new(span, line_column),
-                    ))
-                }
+                };
+                Ok((
+                    Expr::Match(Box::new(matched), arms),
+                    GlobalLoc::new(span, line_column),
+                ))
             }
             Rule::expr => {
                 read!(expr; parsed);

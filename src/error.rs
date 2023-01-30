@@ -16,9 +16,9 @@ pub struct Error {
 
 #[derive(Debug)]
 pub enum ErrorType {
-    PestError(pest::error::Error<Rule>),
-    ParseError(ParseError),
-    TypeError(TypeError),
+    Pest(pest::error::Error<Rule>),
+    Parse(ParseError),
+    Type(TypeError),
 }
 
 impl ErrorType {
@@ -41,7 +41,7 @@ impl From<pest::error::Error<Rule>> for Error {
             InputLocation::Span((a, b)) => Loc::Span(a, b),
         };
         Error {
-            error_type: ErrorType::PestError(value),
+            error_type: ErrorType::Pest(value),
             loc: GlobalLoc { pos, line_column },
         }
     }
@@ -49,13 +49,13 @@ impl From<pest::error::Error<Rule>> for Error {
 
 impl From<ParseError> for ErrorType {
     fn from(value: ParseError) -> Self {
-        ErrorType::ParseError(value)
+        ErrorType::Parse(value)
     }
 }
 
 impl From<TypeError> for ErrorType {
     fn from(value: TypeError) -> Self {
-        ErrorType::TypeError(value)
+        ErrorType::Type(value)
     }
 }
 
