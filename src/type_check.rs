@@ -198,7 +198,7 @@ impl TypeChecker {
                 }
                 if infallible {
                     return Err(Error {
-                        error_type: TypeError::NonInfalliblePattern(pattern, expected_type.clone())
+                        error_type: TypeError::RefutablePattern(pattern, expected_type.clone())
                             .into(),
                         loc: annotation,
                     });
@@ -289,7 +289,7 @@ impl TypeChecker {
                 }
                 if infallible && subtypes.len() != 1 {
                     return Err(Error {
-                        error_type: TypeError::NonInfalliblePattern(
+                        error_type: TypeError::RefutablePattern(
                             Pattern::Inj(nb, pat),
                             expected_type.clone(),
                         )

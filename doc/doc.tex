@@ -12,59 +12,159 @@
 \usepackage[colorlinks=true]{hyperref}
 \usepackage{xcolor}
 
+\newcommand{\linimp}{\multimap}
+\newcommand{\subtype}{<\!:}
+\renewcommand{\emptyset}{\varnothing}
+
 \begin{document}
 
 \section{Grammar}
 
-\begin{align*}
+$x$ is a identifier and $n$ an integer.
+
+\hspace{-2cm}
+\begin{minipage}[t]{1cm}
+  \begin{align*}
     A, B, C, \dots \; ::= \;\;
-      & \verb?int?     \\
-    | & x              \\
-    | & x<A, B, \dots> \\
-    | & ()             \\
-    | & !              \\
-    | & !A             \\
-    | & ?A             \\
-    | & A * B * \dots  \\
-    | & A + B + \dots  \\
-    | & A \multimap B  \\
-    | & \mu x. A       \\
-    | & \forall x. A   \\
-\end{align*}
-
-\begin{align*}
+      & \mathtt{int}                  \\
+    | & x                             \\
+    | & x \langle A, B, \dots \rangle \\
+    | & ()                            \\
+    | & !                             \\
+    | & !A                            \\
+    | & ?A                            \\
+    | & A * B * \dots                 \\
+    | & A + B + \dots                 \\
+    | & A \multimap B                 \\
+    | & \mu x. A                      \\
+    | & \forall x. A                  \\
+  \end{align*}
+\end{minipage}
+\begin{minipage}[t]{3cm}
+  \begin{align*}
     P, Q, \dots \; ::= \;\;
-      & \_               \\
-    | & x                \\
-    | & n                \\
-    | & ()               \\
-    | & P, Q, \dots      \\
-    | & \verb?inj?\;n\;P \\
-\end{align*}
-
-\begin{align*}
+      & \_                 \\
+    | & x                  \\
+    | & n                  \\
+    | & ()                 \\
+    | & P, Q, \dots        \\
+    | & \mathtt{inj}\;n\;P \\
+  \end{align*}
+\end{minipage}
+\begin{minipage}[t]{1cm}
+  \begin{align*}
     e, f, g, \dots \; ::= \;\;
-      & x                                                                            \\
-    | & n                                                                            \\
-    | & ()                                                                           \\
-    | & e<A, B, \dots>                                                               \\
-    | & \verb?inj?\;A\;n\;e                                                          \\
-    | & \verb?unroll?\;e                                                             \\
-    | & \verb?roll?\;A\;e                                                            \\
-    | & e f                                                                          \\
-    | & \verb?let?\;P = e\;\verb?in?\;f                                              \\
-    | & -e                                                                           \\
-    | & e + f                                                                        \\
-    | & e - f                                                                        \\
-    | & e * f                                                                        \\
-    | & e / f                                                                        \\
-    | & e \% f                                                                       \\
-    | & e = f                                                                        \\
-    | & e < f                                                                        \\
-    | & e, f, \dots                                                                  \\
-    | & \verb?match?\;e \{ P \Rightarrow f, Q \Rightarrow g, \dots \}                \\
-    | & \verb?fun?<x, y, \dots>(P : A, Q : B, \dots) \multimap C \{ e \}             \\
-    | & \verb?rec?\;\verb?fun?<x, y, \dots>(P : A, Q : B, \dots) \multimap C \{ e \} \\
-\end{align*}
+      & x                                                                                                \\
+    | & n                                                                                                \\
+    | & ()                                                                                               \\
+    | & e \langle A, B, \dots \rangle                                                                    \\
+    | & \mathtt{inj}\;A\;n\;e                                                                            \\
+    | & \mathtt{unroll}\;e                                                                               \\
+    | & \mathtt{roll}\;A\;e                                                                              \\
+    | & e\;f                                                                                             \\
+    | & \mathtt{let}\;P = e\;\mathtt{in}\;f                                                              \\
+    | & -e                                                                                               \\
+    | & e + f                                                                                            \\
+    | & e - f                                                                                            \\
+    | & e * f                                                                                            \\
+    | & e / f                                                                                            \\
+    | & e \% f                                                                                           \\
+    | & e = f                                                                                            \\
+    | & e < f                                                                                            \\
+    | & e, f, \dots                                                                                      \\
+    | & \mathtt{match}\;e\;\{ P \Rightarrow f, Q \Rightarrow g, \dots \}                                 \\
+    | & \mathtt{fun} \langle x, y, \dots \rangle (P : A, Q : B, \dots) \multimap C \{ e \}               \\
+    | & \mathtt{rec}\;\mathtt{fun} \langle x, y, \dots \rangle (P : A, Q : B, \dots) \multimap C \{ e \} \\
+  \end{align*}
+\end{minipage}
+
+Currently, in the syntaxe $x \langle A, B, \dots, \rangle$, $x$ should be a named type, and not
+a type variable. Furthermore, $x$ should be the name of a type of the form
+$\forall y_1. \dots \forall y_n. T$ in order for $x \langle A_1, \dots, A_n \rangle$ to be a type.
+
+\section{Typing}
+
+\subsection{Subtyping}
+Subtyping is the relation $A \subtype B$, which means that $A$ can be
+used wherever $B$ is needed. It is the smallest preorder that satisfies the following relations :
+
+\[
+  \frac{}{! \subtype A}
+\]
+
+\[
+  \frac{}{!A \subtype A}
+\]
+
+\[
+  \frac{A' \subtype A \;\;\;\; B \subtype B'}{A \linimp B \subtype A' \linimp B'}
+\]
+
+\[
+  \frac{\forall 1 \leq i \leq n \;\; A_i \subtype B_i}{A_1 * \dots * A_n \subtype B_1 * \dots * B_n}
+\]
+
+\[
+  \frac{\forall 1 \leq i \leq n \;\; A_i \subtype B_i}{A_1 + \dots + A_n \subtype B_1 + \dots + B_n}
+\]
+
+\[
+  \frac{A \subtype B}{\mu x. A \subtype \mu x. B}
+\]
+
+\[
+  \frac{A \subtype B}{\forall x. A \subtype \forall x. B}
+\]
+
+\subsection{Pattern typing}
+We say that a pattern $P$ can match a type $T$ and bind variables $x_1: T_1, \dots, x_n: T_n$
+if one can derives $x_1: T_1, \dots, x_n: T_1 \vdash P \prec T$ from the following relations :
+
+\[
+  \frac{}{\vdash \_ \prec T}
+\]
+
+\[
+  \frac{}{x : T \vdash x \prec T}
+\]
+
+\[
+  \frac{}{\vdash n \prec \mathtt{int}}
+\]
+
+\[
+  \frac{}{\vdash () \prec ()}
+\]
+
+\[
+  \frac{x_1:T_1, \dots, x_n:T_n\vdash P\prec T}
+  {x_1: !T_1, \dots, x_n: !T_n\vdash P\prec !T}
+\]
+
+\[
+  \frac{\forall 1 \leq i \leq n \;\; x_{i, 1}, \dots, x_{i, n_i} \vdash P_i \prec T_i
+    \;\;\;\; \forall 1 \leq i < j \leq n
+    \;\;\{x_{i, k} \mid 1 \leq k \leq n_i \} \cap \{x_{j, k} \mid 1 \leq k \leq n_j\} = \emptyset}
+  {x_{1,1}: T_{1,1}, \dots, x_{1, n_1}: T_{1, n_1}, \dots, x_{k, n_k} : T_{k, n_k} \vdash P_1, \dots, P_k \prec T_1 * \dots * T_k}
+\]
+
+\[
+  \frac{x_1: T_1, \dots, x_k: T_n \vdash P \prec A_i
+    \;\;\;\; 1 \leq i \leq n}
+  {x_1, \dots, x_k \vdash \mathtt{inj}\;i\;P \prec A_1 + \dots + A_n}
+\]
+
+\subsection{Irrefutable patterns}
+A pattern is said to be irrefutable if it cannot fail to match. Such patterns are :
+\begin{itemize}
+  \item Discarding
+  \item Binding to a variable
+  \item A tuple of irrefutable patterns (the empty tuple is such a tuple)
+  \item An injection of a sum type of size $1$ and an irrefutable pattern inside
+        (this should probably not happen)
+\end{itemize}
+
+In let bindings or in function arguments, patterns that may appear should be irrefutable.
+
 
 \end{document}

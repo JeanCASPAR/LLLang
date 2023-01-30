@@ -82,7 +82,7 @@ pub enum TypeError {
     ExpectedArity(usize, usize, usize),
     UnknownType(usize),
     NonCompatibleType(Pattern<ParserStage>, Type<TypeCheckStage>),
-    NonInfalliblePattern(Pattern<ParserStage>, Type<TypeCheckStage>),
+    RefutablePattern(Pattern<ParserStage>, Type<TypeCheckStage>),
     /// First binding and pos
     MultipleBindingPattern(usize, GlobalLoc),
 }
