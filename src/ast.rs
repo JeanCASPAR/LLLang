@@ -1,18 +1,18 @@
 use std::{collections::HashMap, fmt::Debug};
 
 pub trait Annotation {
-    type Ident: Debug;
-    type TypeVar: Debug;
+    type Ident: Debug + Clone;
+    type TypeVar: Debug + Clone;
     /// Q stands for "quantified"
-    type QTypeVar: Debug;
-    type Expr: Debug;
-    type Pattern: Debug;
-    type Type: Debug;
-    type FunDef: Debug;
-    type Item: Debug;
+    type QTypeVar: Debug + Clone;
+    type Expr: Debug + Clone;
+    type Pattern: Debug + Clone;
+    type Type: Debug + Clone;
+    type FunDef: Debug + Clone;
+    type Item: Debug + Clone;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Type<A: Annotation> {
     Int,
     Ident(A::Ident),
@@ -29,7 +29,7 @@ pub enum Type<A: Annotation> {
     Forall(A::QTypeVar, Box<(Type<A>, A::Type)>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum BinOp {
     Add,
     Sub,
@@ -40,7 +40,7 @@ pub enum BinOp {
     Lt,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Expr<A: Annotation> {
     Integer(isize),
     Ident(A::Ident),
@@ -66,7 +66,7 @@ pub enum Expr<A: Annotation> {
     ),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Pattern<A: Annotation> {
     Discard,
     Int(isize),
@@ -76,7 +76,7 @@ pub enum Pattern<A: Annotation> {
     Inj(usize, Box<(Pattern<A>, A::Pattern)>),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FunDef<A: Annotation> {
     pub name: Option<A::Ident>,
     pub ty_var: Vec<A::Ident>,
@@ -86,13 +86,13 @@ pub struct FunDef<A: Annotation> {
     pub rec: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Item<A: Annotation> {
     FunDef((FunDef<A>, A::FunDef)),
     TypeDef(A::Ident, (Type<A>, A::Type)),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct File<'a, A: Annotation> {
     pub items: Vec<(Item<A>, A::Item)>,
     pub idents: Vec<&'a str>,

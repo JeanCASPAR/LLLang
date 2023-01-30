@@ -25,7 +25,7 @@ impl ParseIdent {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct ParserStage;
 
 impl Annotation for ParserStage {
@@ -185,7 +185,7 @@ impl<'a> LLLParser<'a> {
                     Some(self.parse_item(item))
                 }
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<_, _>>()?;
 
         Ok(File {
             items,

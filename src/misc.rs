@@ -1,6 +1,6 @@
 /// Shall be replaced by `pub type Never = !;` when
 /// [feature(never_type)](https://github.com/rust-lang/rust/issues/35121) is stabilized
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum Never {}
 
 #[derive(Debug, Clone, Copy)]

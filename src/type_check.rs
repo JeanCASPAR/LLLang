@@ -6,7 +6,7 @@ use crate::{ast::*, error::*, misc::*, parser::ParserStage};
 
 pub use crate::parser::ParseIdent;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct DeBruijnIndex {
     /// De Bruijn index
     pub idx: usize,
@@ -31,7 +31,7 @@ impl DeBruijnIndex {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct TypeCheckStage;
 
 impl Annotation for TypeCheckStage {
@@ -90,12 +90,12 @@ impl TypeChecker {
     /// type variables already encountered
     fn real_check_type<'b>(
         &self,
-        ty: (Type<ParserStage>, <ParserStage as Annotation>::Type),
+        (ty, annotation): (Type<ParserStage>, <ParserStage as Annotation>::Type),
         name_map: &'b mut ScopedStack<usize, (usize, GlobalLoc)>,
         level: usize,
     ) -> Result<(Type<TypeCheckStage>, <TypeCheckStage as Annotation>::Type), Error> {
         name_map.push_scope();
-        let this = match ty.0 {
+        let ty = match ty {
             Type::Int => Type::Int,
             Type::Ident(name) => match name_map.get(&name.name) {
                 Some((original_level, parent_loc)) => Type::TypeVar(DeBruijnIndex::new(
@@ -126,7 +126,7 @@ impl TypeChecker {
                                     params
                                         .into_iter()
                                         .map(|param| self.real_check_type(param, name_map, level))
-                                        .collect::<Result<Vec<_>, _>>()?,
+                                        .collect::<Result<_, _>>()?,
                                 ))
                             }
                         })?
@@ -141,12 +141,12 @@ impl TypeChecker {
             Type::Tuple(ty) => Type::Tuple(
                 ty.into_iter()
                     .map(|param| self.real_check_type(param, name_map, level))
-                    .collect::<Result<Vec<_>, _>>()?,
+                    .collect::<Result<_, _>>()?,
             ),
             Type::Sum(ty) => Type::Sum(
                 ty.into_iter()
                     .map(|param| self.real_check_type(param, name_map, level))
-                    .collect::<Result<Vec<_>, _>>()?,
+                    .collect::<Result<_, _>>()?,
             ),
             Type::Impl(ty1, ty2) => Type::Impl(
                 Box::new(self.real_check_type(*ty1, name_map, level)?),
@@ -168,6 +168,121 @@ impl TypeChecker {
             }
         };
         name_map.pop_scope();
-        Ok((this, ty.1))
+        Ok((ty, annotation))
+    }
+
+    fn check_pattern(
+        &self,
+        (pattern, annotation): (Pattern<ParserStage>, <ParserStage as Annotation>::Pattern),
+        expected_type: &Type<ParserStage>,
+        infallible: bool,
+    ) -> Result<
+        (
+            Pattern<TypeCheckStage>,
+            <TypeCheckStage as Annotation>::Pattern,
+        ),
+        Error,
+    > {
+        let pat = match pattern {
+            Pattern::Discard => Pattern::Discard,
+            Pattern::Int(n) => {
+                if !matches!(expected_type, Type::Int) {
+                    return Err(Error {
+                        error_type: TypeError::NonCompatibleType(pattern, expected_type.clone())
+                            .into(),
+                        loc: annotation,
+                    });
+                }
+                if infallible {
+                    return Err(Error {
+                        error_type: TypeError::NonInfalliblePattern(pattern, expected_type.clone())
+                            .into(),
+                        loc: annotation,
+                    });
+                };
+                Pattern::Int(n)
+            }
+            Pattern::Ident(id) => Pattern::Ident(id),
+            Pattern::Unit => {
+                if !matches!(expected_type, Type::Unit) {
+                    return Err(Error {
+                        error_type: TypeError::NonCompatibleType(pattern, expected_type.clone())
+                            .into(),
+                        loc: annotation,
+                    });
+                }
+                Pattern::Unit
+            }
+            Pattern::Tuple(subpatterns) => {
+                let subtypes = if let Type::Tuple(subtypes) = expected_type {
+                    subtypes
+                } else {
+                    return Err(Error {
+                        error_type: TypeError::NonCompatibleType(
+                            Pattern::Tuple(subpatterns),
+                            expected_type.clone(),
+                        )
+                        .into(),
+                        loc: annotation,
+                    });
+                };
+                if subpatterns.len() != subtypes.len() {
+                    return Err(Error {
+                        error_type: TypeError::NonCompatibleType(
+                            Pattern::Tuple(subpatterns),
+                            expected_type.clone(),
+                        )
+                        .into(),
+                        loc: annotation,
+                    });
+                }
+                Pattern::Tuple(
+                    subpatterns
+                        .into_iter()
+                        .zip(subtypes)
+                        .map(|(subpat, subty)| self.check_pattern(subpat, &subty.0, infallible))
+                        .collect::<Result<_, _>>()?,
+                )
+            }
+            Pattern::Inj(nb, pat) => {
+                let subtypes = if let Type::Sum(subtypes) = expected_type {
+                    subtypes
+                } else {
+                    return Err(Error {
+                        error_type: TypeError::NonCompatibleType(
+                            Pattern::Inj(nb, pat),
+                            expected_type.clone(),
+                        )
+                        .into(),
+                        loc: annotation,
+                    });
+                };
+                if nb >= subtypes.len() {
+                    return Err(Error {
+                        error_type: TypeError::NonCompatibleType(
+                            Pattern::Inj(nb, pat),
+                            expected_type.clone(),
+                        )
+                        .into(),
+                        loc: annotation,
+                    });
+                }
+                if infallible && subtypes.len() != 1 {
+                    return Err(Error {
+                        error_type: TypeError::NonInfalliblePattern(
+                            Pattern::Inj(nb, pat),
+                            expected_type.clone(),
+                        )
+                        .into(),
+                        loc: annotation,
+                    });
+                }
+                Pattern::Inj(
+                    nb,
+                    Box::new(self.check_pattern(*pat, &subtypes[nb].0, infallible)?),
+                )
+            }
+        };
+        Ok((pat, annotation))
     }
 }

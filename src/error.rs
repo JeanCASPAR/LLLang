@@ -3,8 +3,9 @@ use pest::error::{InputLocation, LineColLocation};
 use std::num::ParseIntError;
 
 use crate::{
+    ast::*,
     misc::*,
-    parser::{ParseIdent, Rule},
+    parser::{ParserStage, Rule},
 };
 
 #[derive(Debug)]
@@ -79,4 +80,6 @@ pub enum TypeError {
     /// Type [ident] was expected of arity [second usize], not [third usize]
     ExpectedArity(usize, usize, usize),
     UnknownType(usize),
+    NonCompatibleType(Pattern<ParserStage>, Type<ParserStage>),
+    NonInfalliblePattern(Pattern<ParserStage>, Type<ParserStage>),
 }
