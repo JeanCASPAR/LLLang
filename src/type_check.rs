@@ -139,7 +139,7 @@ impl TypeChecker {
             Type::OfCourse(ty) => {
                 Type::OfCourse(Box::new(self.real_check_type(*ty, name_map, level)?))
             }
-            Type::WhyNot(ty) => Type::WhyNot(Box::new(self.real_check_type(*ty, name_map, level)?)),
+            // Type::WhyNot(ty) => Type::WhyNot(Box::new(self.real_check_type(*ty, name_map, level)?)),
             Type::Tuple(ty) => Type::Tuple(
                 ty.into_iter()
                     .map(|param| self.real_check_type(param, name_map, level))

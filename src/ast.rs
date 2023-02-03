@@ -21,7 +21,7 @@ pub enum Type<A: Annotation> {
     Unit,
     Never,
     OfCourse(Box<(Type<A>, A::Type)>),
-    WhyNot(Box<(Type<A>, A::Type)>),
+    // WhyNot(Box<(Type<A>, A::Type)>),
     Tuple(Vec<(Type<A>, A::Type)>),
     Sum(Vec<(Type<A>, A::Type)>),
     Impl(Box<(Type<A>, A::Type)>, Box<(Type<A>, A::Type)>),

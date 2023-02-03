@@ -289,13 +289,13 @@ impl<'a> LLLParser<'a> {
                     GlobalLoc::new(span, line_column),
                 ))
             }
-            Rule::ty_why_not => {
+            /*Rule::ty_why_not => {
                 read!(ty; parsed);
                 Ok((
                     Type::WhyNot(Box::new(self.parse_type(ty)?)),
                     GlobalLoc::new(span, line_column),
                 ))
-            }
+            }*/
             Rule::ty_param => {
                 let mut pairs = parsed.into_inner();
                 let pair = if let Some(pair) = pairs.next() {

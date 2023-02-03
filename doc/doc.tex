@@ -16,7 +16,16 @@
 \newcommand{\subtype}{<\!:}
 \renewcommand{\emptyset}{\varnothing}
 
+\title{LLLang reference}
+\author{Jean \textsc{Caspar}}
+
 \begin{document}
+
+\maketitle
+
+\tableofcontents
+
+\newpage
 
 \section{Grammar}
 
@@ -32,7 +41,7 @@ $x$ is a identifier and $n$ an integer.
     | & ()                            \\
     | & !                             \\
     | & !A                            \\
-    | & ?A                            \\
+    %| & ?A                            \\
     | & A * B * \dots                 \\
     | & A + B + \dots                 \\
     | & A \multimap B                 \\
@@ -85,7 +94,7 @@ $\forall y_1. \dots \forall y_n. T$ in order for $x \langle A_1, \dots, A_n \ran
 \section{Typing}
 
 \subsection{Subtyping}
-Subtyping is the relation $A \subtype B$, which means that $A$ can be
+Subtyping is the relation $A \subtype B$, ich means that $A$ can be
 used wherever $B$ is needed. It is the smallest preorder that satisfies the following relations :
 
 \[
@@ -165,6 +174,8 @@ A pattern is said to be irrefutable if it cannot fail to match. Such patterns ar
 \end{itemize}
 
 In let bindings or in function arguments, patterns that may appear should be irrefutable.
+
+\subsection{Pattern matching}
 
 
 \end{document}
