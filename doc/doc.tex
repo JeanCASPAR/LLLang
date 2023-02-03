@@ -32,7 +32,7 @@
 $x$ is a identifier and $n$ an integer.
 
 \hspace{-2cm}
-\begin{minipage}[t]{1cm}
+\begin{minipage}[t]{10cm}
   \begin{align*}
     A, B, C, \dots \; ::= \;\;
       & \mathtt{int}                  \\
@@ -49,7 +49,7 @@ $x$ is a identifier and $n$ an integer.
     | & \forall x. A                  \\
   \end{align*}
 \end{minipage}
-\begin{minipage}[t]{3cm}
+\begin{minipage}[t]{10cm}
   \begin{align*}
     P, Q, \dots \; ::= \;\;
       & \_                 \\
@@ -60,31 +60,22 @@ $x$ is a identifier and $n$ an integer.
     | & \mathtt{inj}\;n\;P \\
   \end{align*}
 \end{minipage}
-\begin{minipage}[t]{1cm}
-  \begin{align*}
-    e, f, g, \dots \; ::= \;\;
-      & x                                                                                                \\
-    | & n                                                                                                \\
-    | & ()                                                                                               \\
-    | & e \langle A, B, \dots \rangle                                                                    \\
-    | & \mathtt{inj}\;A\;n\;e                                                                            \\
-    | & \mathtt{unroll}\;e                                                                               \\
-    | & \mathtt{roll}\;A\;e                                                                              \\
-    | & e\;f                                                                                             \\
-    | & \mathtt{let}\;P = e\;\mathtt{in}\;f                                                              \\
-    | & -e                                                                                               \\
-    | & e + f                                                                                            \\
-    | & e - f                                                                                            \\
-    | & e * f                                                                                            \\
-    | & e / f                                                                                            \\
-    | & e \% f                                                                                           \\
-    | & e = f                                                                                            \\
-    | & e < f                                                                                            \\
-    | & e, f, \dots                                                                                      \\
-    | & \mathtt{match}\;e\;\{ P \Rightarrow f, Q \Rightarrow g, \dots \}                                 \\
-    | & \mathtt{fun} \langle x, y, \dots \rangle (P : A, Q : B, \dots) \multimap C \{ e \}               \\
-    | & \mathtt{rec}\;\mathtt{fun} \langle x, y, \dots \rangle (P : A, Q : B, \dots) \multimap C \{ e \} \\
-  \end{align*}
+\begin{minipage}[t]{20cm}
+  \[\begin{array}{cll}
+      e, f, g, \dots \; ::= \;\; & x                                                                                                  & | n                                    \\
+                                 & | ()                                                                                               & | e \langle A, B, \dots \rangle        \\
+                                 & | \mathtt{roll}\;A\;e                                                                              & | \mathtt{unroll}\;e                   \\
+                                 & | \mathtt{inj}\;A\;n\;e                                                                            & | e\;f                                 \\
+                                 & | \mathtt{let}\;P = e\;\mathtt{in}\;f                                                              & | \mathtt{let}\;!x = e\;\mathtt{in}\;f \\
+                                 & | -e                                                                                                                                        \\
+                                 & | e + f                                                                                            & | e - f                                \\
+                                 & | e * f                                                                                            & | e / f                                \\
+                                 & | e \% f                                                                                           & | e = f                                \\
+                                 & | e < f                                                                                            & | e, f, \dots                          \\
+                                 & | \mathtt{match}\;e\;\{ P \Rightarrow f, Q \Rightarrow g, \dots \}                                                                          \\
+                                 & | \mathtt{fun} \langle x, y, \dots \rangle (P : A, Q : B, \dots) \multimap C \{ e \}                                                        \\
+                                 & | \mathtt{rec}\;\mathtt{fun} \langle x, y, \dots \rangle (P : A, Q : B, \dots) \multimap C \{ e \}                                          \\
+    \end{array}\]
 \end{minipage}
 
 Currently, in the syntaxe $x \langle A, B, \dots, \rangle$, $x$ should be a named type, and not
@@ -99,10 +90,6 @@ used wherever $B$ is needed. It is the smallest preorder that satisfies the foll
 
 \[
   \frac{}{! \subtype A}
-\]
-
-\[
-  \frac{}{!A \subtype A}
 \]
 
 \[
@@ -173,9 +160,8 @@ A pattern is said to be irrefutable if it cannot fail to match. Such patterns ar
         (this should probably not happen)
 \end{itemize}
 
-In let bindings or in function arguments, patterns that may appear should be irrefutable.
+In let bindings or in function arguments, patterns that appear should be irrefutable.
 
 \subsection{Pattern matching}
-
 
 \end{document}
