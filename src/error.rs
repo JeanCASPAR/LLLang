@@ -77,6 +77,7 @@ impl From<ParseIntError> for ParseError {
 
 #[derive(Debug)]
 pub enum TypeError {
+    DiscardLinearExpr(Pattern<ParserStage>, Type<TypeCheckStage>),
     TypeVarWithParam(usize),
     /// Type [ident] was expected of arity [second usize], not [third usize]
     ExpectedArity(usize, usize, usize),

@@ -52,11 +52,16 @@ pub enum Expr<A: Annotation> {
     /// Unroll(•) :  µx.A -> A[x := µx.A]
     Unroll(Box<(Expr<A>, A::Expr)>),
     App(Box<(Expr<A>, A::Expr)>, Box<(Expr<A>, A::Expr)>),
+    /// let x = e in e
     Let(
         (Pattern<A>, A::Pattern),
         Box<(Expr<A>, A::Expr)>,
         Box<(Expr<A>, A::Expr)>,
     ),
+    /// let !x = y in e
+    LetOfCourse(A::Ident, A::Ident, Box<(Expr<A>, A::Expr)>),
+    /// let x = !e in e
+    OfCourseLet(A::Ident, Box<(Expr<A>, A::Expr)>, Box<(Expr<A>, A::Expr)>),
     Neg(Box<(Expr<A>, A::Expr)>),
     BinOp(BinOp, Box<(Expr<A>, A::Expr)>, Box<(Expr<A>, A::Expr)>),
     Fun(Box<(FunDef<A>, A::FunDef)>),

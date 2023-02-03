@@ -37,8 +37,10 @@ e_unroll = { "unroll" ~ e_atom }
 e_roll = { "roll" ~ type ~ e_atom }
 e_app = { e_atom ~ e_1 }
 e_1 = _{ e_param | e_inj | e_unroll | e_roll | e_app | e_atom }
+e_of_course_let = { "let" ~ ident ~ "=" ~ "!" ~ expr ~ "in" ~ expr }
+e_let_of_course = { "let" ~ "!" ~ ident ~ "=" ~ expr ~ "in" ~ expr }
 e_let = { "let" ~ pattern ~ "=" ~ expr ~ "in" ~ expr }
-e_2 = _{ e_let | e_1 }
+e_2 = _{ e_of_course_let | e_let_of_course | e_let | e_1 }
 e_neg = { "-" ~ e_2 }
 e_3 = _{ e_neg | e_2 }
 e_mul = { e_3 ~ ("*" ~ e_4) }

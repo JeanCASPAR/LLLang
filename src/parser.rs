@@ -485,6 +485,26 @@ impl<'a> LLLParser<'a> {
                     GlobalLoc::new(span, line_column),
                 ))
             }
+            Rule::e_let_of_course => {
+                read!(id1, id2, e; parsed);
+                let id1 = self.parse_ident(id1)?;
+                let id2 = self.parse_ident(id2)?;
+                let e = self.parse_expr(e)?;
+                Ok((
+                    Expr::LetOfCourse(id1, id2, Box::new(e)),
+                    GlobalLoc::new(span, line_column),
+                ))
+            }
+            Rule::e_of_course_let => {
+                read!(id, e1, e2; parsed);
+                let id = self.parse_ident(id)?;
+                let e1 = self.parse_expr(e1)?;
+                let e2 = self.parse_expr(e2)?;
+                Ok((
+                    Expr::OfCourseLet(id, Box::new(e1), Box::new(e2)),
+                    GlobalLoc::new(span, line_column),
+                ))
+            }
             Rule::e_neg => {
                 read!(e; parsed);
                 let e = self.parse_expr(e)?;

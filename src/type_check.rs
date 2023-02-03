@@ -187,7 +187,16 @@ impl TypeChecker {
         Error,
     > {
         let pat = match pattern {
-            Pattern::Discard => Pattern::Discard,
+            Pattern::Discard => {
+                if !matches!(expected_type, Type::OfCourse(_)) {
+                    return Err(Error {
+                        error_type: TypeError::DiscardLinearExpr(pattern, expected_type.clone())
+                            .into(),
+                        loc: annotation,
+                    });
+                }
+                Pattern::Discard
+            }
             Pattern::Int(n) => {
                 if !matches!(expected_type, Type::Int) {
                     return Err(Error {
@@ -322,6 +331,8 @@ impl TypeChecker {
             Expr::Unroll(_) => todo!(),
             Expr::App(_, _) => todo!(),
             Expr::Let(_, _, _) => todo!(),
+            Expr::LetOfCourse(_, _, _) => todo!(),
+            Expr::OfCourseLet(_, _, _) => todo!(),
             Expr::Neg(_) => todo!(),
             Expr::BinOp(_, _, _) => todo!(),
             Expr::Fun(_) => todo!(),
