@@ -86,4 +86,10 @@ pub enum TypeError {
     RefutablePattern(Pattern<ParserStage>, Type<TypeCheckStage>),
     /// First binding and pos
     MultipleBindingPattern(usize, GlobalLoc),
+    /// Expected [first], got [second]
+    MismatchedType(Type<TypeCheckStage>, Type<TypeCheckStage>),
+    UnknownVariable(usize, Type<TypeCheckStage>),
+    InjNotASum(Type<TypeCheckStage>),
+    SumNotEnoughBranch(Type<TypeCheckStage>, usize),
+    NonUnrollableType(Type<TypeCheckStage>),
 }

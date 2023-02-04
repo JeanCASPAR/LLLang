@@ -5,6 +5,7 @@ pub trait Annotation {
     type TypeVar: Debug + Clone;
     /// Q stands for "quantified"
     type QTypeVar: Debug + Clone;
+    type TypeParam: Debug + Clone;
     type Expr: Debug + Clone;
     type Pattern: Debug + Clone;
     type Type: Debug + Clone;
@@ -17,7 +18,7 @@ pub enum Type<A: Annotation> {
     Int,
     Ident(A::Ident),
     TypeVar(A::TypeVar),
-    Param(A::Ident, Vec<(Type<A>, A::Type)>),
+    Param(A::Ident, Vec<(Type<A>, A::Type)>, A::TypeParam),
     Unit,
     Never,
     OfCourse(Box<(Type<A>, A::Type)>),

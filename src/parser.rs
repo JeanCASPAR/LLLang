@@ -32,6 +32,7 @@ impl Annotation for ParserStage {
     type Ident = ParseIdent;
     type TypeVar = Never;
     type QTypeVar = ParseIdent;
+    type TypeParam = ();
     type Expr = GlobalLoc;
     type Pattern = GlobalLoc;
     type Type = GlobalLoc;
@@ -308,7 +309,10 @@ impl<'a> LLLParser<'a> {
                 let params = pairs
                     .map(|arg| self.parse_type(arg))
                     .collect::<Result<_, _>>()?;
-                Ok((Type::Param(id, params), GlobalLoc::new(span, line_column)))
+                Ok((
+                    Type::Param(id, params, ()),
+                    GlobalLoc::new(span, line_column),
+                ))
             }
             Rule::ty_mu => {
                 read!(id, ty; parsed);

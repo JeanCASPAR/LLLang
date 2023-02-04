@@ -6,3 +6,5 @@ bof sur le pattern matching
 Remettre ?A
 
 Mais ! On peut pas discard !! sauf les !
+Y a des pb dans le tc, je gère mal les alias
+(de toute façon je veux du hash-consing à la fin)
