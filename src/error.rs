@@ -96,4 +96,5 @@ pub enum TypeError {
     ExpectedFunction(Expr<TypeCheckStage>, Type<TypeCheckStage>),
     /// The type is not a forall
     NonParametableType(Type<TypeCheckStage>),
+    NonUsedLinearVar(usize, Type<TypeCheckStage>),
 }

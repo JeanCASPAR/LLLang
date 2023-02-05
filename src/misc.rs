@@ -70,8 +70,10 @@ mod scope {
             self.parents.push(current);
         }
 
-        pub fn pop_scope(&mut self) {
+        pub fn pop_scope(&mut self) -> HashMap<K, (V, bool)> {
+            let cur = std::mem::take(&mut self.current);
             self.current = self.parents.pop().expect("Can't pop from empty stack");
+            cur
         }
 
         /// When a scope is locked, only non-lockable variables can be accessed
@@ -163,13 +165,12 @@ mod scope {
             }
         }
 
-        /// Only removes in the current scope
-        pub fn remove<Q>(&mut self, k: &Q) -> Option<V>
+        pub fn remove<Q>(&mut self, k: &Q) -> Option<(V, bool)>
         where
             K: Borrow<Q>,
             Q: Hash + Eq + ?Sized,
         {
-            self.current.remove(k).map(|(v, _)| v)
+            self.iter_scope_mut().find_map(|table| table.remove(k))
         }
     }
 }

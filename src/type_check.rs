@@ -40,7 +40,7 @@ impl Annotation for TypeCheckStage {
     type TypeVar = DeBruijnIndex;
     type QTypeVar = ParseIdent;
     type TypeParam = Never;
-    type Expr = (GlobalLoc, Type<TypeCheckStage>);
+    type Expr = (Type<TypeCheckStage>, GlobalLoc);
     type Pattern = GlobalLoc;
     type Type = GlobalLoc;
     type FunDef = GlobalLoc;
@@ -307,7 +307,7 @@ impl TypeChecker {
     fn check_expr(
         &self,
         (expr, annotation): (Expr<ParserStage>, <ParserStage as Annotation>::Expr),
-        bindings: &mut HashMap<usize, (Type<TypeCheckStage>, GlobalLoc)>,
+        bindings: &mut Scope<usize, (Type<TypeCheckStage>, GlobalLoc)>,
         local_types: &'_ mut Scope<usize, (usize, GlobalLoc)>,
     ) -> Result<(Expr<TypeCheckStage>, <TypeCheckStage as Annotation>::Expr), Error> {
         let (e, ty) = match expr {
@@ -330,7 +330,7 @@ impl TypeChecker {
                     .map(|ty| self.check_type(ty, local_types))
                     .collect::<Result<Vec<_>, _>>()?;
                 let e = self.check_expr(*e, bindings, local_types)?;
-                let (mut loc, mut ty) = e.1.clone();
+                let (mut ty, mut loc) = e.1.clone();
                 for _ in 0..params.len() {
                     let Type::Forall(_, tybis) = ty
                     else {
@@ -360,9 +360,9 @@ impl TypeChecker {
                 }
 
                 let e = self.check_expr(*e, bindings, local_types)?;
-                if !(e.1).1.eq(&ty[branch].0, &self.known_types) {
+                if !(e.1).0.eq(&ty[branch].0, &self.known_types) {
                     return Err(Error {
-                        error_type: TypeError::MismatchedType(ty.swap_remove(branch).0, e.1 .1)
+                        error_type: TypeError::MismatchedType(ty.swap_remove(branch).0, (e.1).0)
                             .into(),
                         loc: annotation,
                     });
@@ -382,9 +382,9 @@ impl TypeChecker {
                 }
                 let e = self.check_expr(*e, bindings, local_types)?;
                 let unrolled_ty = ty.clone().unroll();
-                if !unrolled_ty.eq(&(e.1).1, &self.known_types) {
+                if !unrolled_ty.eq(&(e.1).0, &self.known_types) {
                     return Err(Error {
-                        error_type: TypeError::MismatchedType(unrolled_ty, (e.1).1).into(),
+                        error_type: TypeError::MismatchedType(unrolled_ty, (e.1).0).into(),
                         loc: annotation,
                     });
                 }
@@ -392,33 +392,33 @@ impl TypeChecker {
             }
             Expr::Unroll(e) => {
                 let e = self.check_expr(*e, bindings, local_types)?;
-                if !matches!((e.1).1, Type::Mu(_, _)) {
+                if !matches!((e.1).0, Type::Mu(_, _)) {
                     return Err(Error {
-                        error_type: TypeError::NonUnrollableType((e.1).1).into(),
+                        error_type: TypeError::NonUnrollableType((e.1).0).into(),
                         loc: annotation,
                     });
                 }
-                let unrolled_ty = (e.1).1.clone().unroll();
+                let unrolled_ty = (e.1).0.clone().unroll();
                 (Expr::Unroll(Box::new(e)), unrolled_ty)
             }
             Expr::App(e1, e2) => {
                 let e1 = self.check_expr(*e1, bindings, local_types)?;
                 let e2 = self.check_expr(*e2, bindings, local_types)?;
 
-                let Type::Impl(ty1, ty2) = (e1.1).1.clone()
+                let Type::Impl(ty1, ty2) = (e1.1).0.clone()
                 else {
                     return Err(Error {
-                        error_type: TypeError::ExpectedFunction(e1.0, (e1.1).1).into(),
-                        loc: (e1.1).0,
+                        error_type: TypeError::ExpectedFunction(e1.0, (e1.1).0).into(),
+                        loc: (e1.1).1,
                     });
                 };
                 let ty1 = ty1.0;
                 let ty2 = ty2.0;
 
-                if !(e2.1).1.eq(&ty1, &self.known_types) {
+                if !(e2.1).0.eq(&ty1, &self.known_types) {
                     return Err(Error {
-                        error_type: TypeError::MismatchedType(ty1, (e2.1).1).into(),
-                        loc: (e2.1).0,
+                        error_type: TypeError::MismatchedType(ty1, (e2.1).0).into(),
+                        loc: (e2.1).1,
                     });
                 }
 
@@ -428,28 +428,14 @@ impl TypeChecker {
                 let e1 = self.check_expr(*e1, bindings, local_types)?;
 
                 let mut pat_bindings = HashMap::new();
-                let pat = self.check_pattern(pat, &(e1.1).1, true, &mut pat_bindings)?;
+                let pat = self.check_pattern(pat, &(e1.1).0, true, &mut pat_bindings)?;
 
                 for (var, (ty, loc)) in pat_bindings {
-                    match bindings.entry(var) {
-                        Entry::Occupied(e) => {
-                            let (old_ty, prev_loc) = e.remove();
-                            if !matches!(old_ty, Type::OfCourse(_)) {
-                                return Err(Error {
-                                    error_type: TypeError::MultipleBindingPattern(var, prev_loc)
-                                        .into(),
-                                    loc: loc,
-                                });
-                            }
-                        }
-                        Entry::Vacant(e) => {
-                            e.insert((ty, loc));
-                        }
-                    }
+                    Self::linear_insert(var, ty, loc, bindings)?;
                 }
 
                 let e2 = self.check_expr(*e2, bindings, local_types)?;
-                let ty = (e2.1).1.clone();
+                let ty = (e2.1).0.clone();
 
                 (Expr::Let(pat, Box::new(e1), Box::new(e2)), ty)
             }
@@ -466,34 +452,37 @@ impl TypeChecker {
                     });
                 };
 
-                match bindings.entry(x.name) {
-                    Entry::Occupied(e) => {
-                        let (old_ty, prev_loc) = e.remove();
-                        if !matches!(old_ty, Type::OfCourse(_)) {
-                            return Err(Error {
-                                error_type: TypeError::MultipleBindingPattern(x.name, prev_loc)
-                                    .into(),
-                                loc: x.loc,
-                            });
-                        }
-                    }
-                    Entry::Vacant(e) => {
-                        e.insert((ty.0, x.loc));
-                    }
-                }
+                Self::linear_insert(x.name, ty.0, x.loc, bindings)?;
 
                 let e = self.check_expr(*e, bindings, local_types)?;
-                let ty = (e.1).1.clone();
+                let ty = (e.1).0.clone();
 
                 (Expr::LetOfCourse(x, y, Box::new(e)), ty)
             }
-            // TODO: idem
-            Expr::OfCourseLet(_, _, _) => todo!(),
+            Expr::OfCourseLet(x, e1, e2) => {
+                bindings.push_scope();
+                bindings.lock();
+                let e1 = self.check_expr(*e1, bindings, local_types)?;
+                bindings.unlock();
+                let scope = bindings.pop_scope();
+
+                Self::assert_scope_clean(scope)?;
+
+                bindings.insert(
+                    x.name,
+                    (Type::OfCourse(Box::new(e1.1.clone())), x.loc),
+                    false,
+                );
+
+                let e2 = self.check_expr(*e2, bindings, local_types)?;
+                let ty = (e2.1).0.clone();
+                (Expr::OfCourseLet(x, Box::new(e1), Box::new(e2)), ty)
+            }
             Expr::Neg(e) => {
                 let e = self.check_expr(*e, bindings, local_types)?;
-                if !(e.1).1.eq(&Type::Int, &self.known_types) {
+                if !(e.1).0.eq(&Type::Int, &self.known_types) {
                     return Err(Error {
-                        error_type: TypeError::MismatchedType(Type::Int, (e.1).1).into(),
+                        error_type: TypeError::MismatchedType(Type::Int, (e.1).0).into(),
                         loc: annotation,
                     });
                 }
@@ -502,17 +491,17 @@ impl TypeChecker {
             }
             Expr::BinOp(op, e1, e2) => {
                 let e1 = self.check_expr(*e1, bindings, local_types)?;
-                if !(e1.1).1.eq(&Type::Int, &self.known_types) {
+                if !(e1.1).0.eq(&Type::Int, &self.known_types) {
                     return Err(Error {
-                        error_type: TypeError::MismatchedType(Type::Int, (e1.1).1).into(),
+                        error_type: TypeError::MismatchedType(Type::Int, (e1.1).0).into(),
                         loc: annotation,
                     });
                 }
 
                 let e2 = self.check_expr(*e2, bindings, local_types)?;
-                if !(e2.1).1.eq(&Type::Int, &self.known_types) {
+                if !(e2.1).0.eq(&Type::Int, &self.known_types) {
                     return Err(Error {
-                        error_type: TypeError::MismatchedType(Type::Int, (e2.1).1).into(),
+                        error_type: TypeError::MismatchedType(Type::Int, (e2.1).0).into(),
                         loc: annotation,
                     });
                 }
@@ -528,39 +517,23 @@ impl TypeChecker {
                     let (pat, e_branch) = branch;
                     let mut pat_bindings = HashMap::new();
 
-                    let pat = self.check_pattern(pat, &(e.1).1, false, &mut pat_bindings)?;
+                    let pat = self.check_pattern(pat, &(e.1).0, false, &mut pat_bindings)?;
 
                     for (var, (ty, loc)) in pat_bindings {
-                        match bindings.entry(var) {
-                            Entry::Occupied(e) => {
-                                let (old_ty, prev_loc) = e.remove();
-                                if !matches!(old_ty, Type::OfCourse(_)) {
-                                    return Err(Error {
-                                        error_type: TypeError::MultipleBindingPattern(
-                                            var, prev_loc,
-                                        )
-                                        .into(),
-                                        loc: loc,
-                                    });
-                                }
-                            }
-                            Entry::Vacant(e) => {
-                                e.insert((ty, loc));
-                            }
-                        }
+                        Self::linear_insert(var, ty, loc, bindings)?;
                     }
 
                     let e_branch = self.check_expr(e_branch, bindings, local_types)?;
                     if let Some(ref common_ty) = common_ty {
-                        if !(e_branch.1).1.eq(common_ty, &self.known_types) {
+                        if !(e_branch.1).0.eq(common_ty, &self.known_types) {
                             return Err(Error {
-                                error_type: TypeError::MismatchedType(common_ty.clone(), e.1 .1)
+                                error_type: TypeError::MismatchedType(common_ty.clone(), (e.1).0)
                                     .into(),
                                 loc: annotation,
                             });
                         }
                     } else {
-                        common_ty = Some((e_branch.1).1.clone());
+                        common_ty = Some((e_branch.1).0.clone());
                     }
                     new_branches.push((pat, e_branch));
                 }
@@ -570,7 +543,41 @@ impl TypeChecker {
                 (Expr::Match(Box::new(e), new_branches), common_ty.unwrap())
             }
         };
-        Ok((e, (annotation, ty)))
+        Ok((e, (ty, annotation)))
+    }
+
+    fn assert_scope_clean(
+        scope: HashMap<usize, ((Type<TypeCheckStage>, GlobalLoc), bool)>,
+    ) -> Result<(), Error> {
+        for (var, ((ty, loc), linear)) in scope {
+            if linear {
+                return Err(Error {
+                    error_type: TypeError::NonUsedLinearVar(var, ty).into(),
+                    loc,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn linear_insert(
+        var: usize,
+        ty: Type<TypeCheckStage>,
+        loc: GlobalLoc,
+        bindings: &mut Scope<usize, (Type<TypeCheckStage>, GlobalLoc)>,
+    ) -> Result<(), Error> {
+        if let Some(((_, prev_loc), linear)) = bindings.remove(&var) {
+            if linear {
+                return Err(Error {
+                    error_type: TypeError::MultipleBindingPattern(var, prev_loc).into(),
+                    loc,
+                });
+            }
+        }
+
+        let linear = !matches!(ty, Type::OfCourse(_));
+        bindings.insert(var, (ty, loc), linear);
+        Ok(())
     }
 }
 
