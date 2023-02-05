@@ -669,6 +669,6 @@ impl Type<TypeCheckStage> {
         let Type::Mu(_, ty) = self
         else { unreachable!() };
 
-        ty.0.specialize(vec![this])
+        ty.0.real_specialize(vec![this], 0)
     }
 }
