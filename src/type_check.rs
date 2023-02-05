@@ -338,8 +338,25 @@ impl TypeChecker {
 
                 (Expr::Ident(id), ty)
             }
-            // TODO: il faut de l'inférence de type
-            Expr::Param(_, _) => todo!(),
+            Expr::Param(e, params) => {
+                let params = params
+                    .into_iter()
+                    // TODO: not zero!
+                    .map(|ty| self.real_check_type(ty, local_types, 0))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let e = self.check_expr(*e, bindings, local_types)?;
+                let (mut loc, mut ty) = e.1.clone();
+                for _ in 0..params.len() {
+                    let Type::Forall(_, tybis) = ty
+                    else {
+                        return Err(Error { error_type: TypeError::NonParametableType(ty).into(), loc, })
+                    };
+                    ty = tybis.0;
+                    loc = tybis.1;
+                }
+                let ty = ty.real_specialize(params.iter().map(|(ty, _)| ty.clone()).collect(), 0);
+                (Expr::Param(Box::new(e), params), ty)
+            }
             Expr::Unit => (Expr::Unit, Type::Unit),
             Expr::Inj(ty, branch, e) => {
                 // TODO: not zero!
@@ -372,6 +389,7 @@ impl TypeChecker {
                 )
             }
             Expr::Roll(ty, e) => {
+                // TODO: not zero!
                 let (ty, ty_loc) = self.real_check_type(ty, local_types, 0)?;
                 if !matches!(ty, Type::Mu(_, _)) {
                     return Err(Error {

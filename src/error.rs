@@ -94,4 +94,6 @@ pub enum TypeError {
     SumNotEnoughBranch(Type<TypeCheckStage>, usize),
     NonUnrollableType(Type<TypeCheckStage>),
     ExpectedFunction(Expr<TypeCheckStage>, Type<TypeCheckStage>),
+    /// The type is not a forall
+    NonParametableType(Type<TypeCheckStage>),
 }
