@@ -78,6 +78,7 @@ impl From<ParseIntError> for ParseError {
 #[derive(Debug)]
 pub enum TypeError {
     DiscardLinearExpr(Pattern<ParserStage>, Type<TypeCheckStage>),
+    DuplicateLinearExpression(usize),
     TypeVarWithParam(usize),
     /// Type [ident] was expected of arity [second usize], not [third usize]
     ExpectedArity(usize, usize, usize),
@@ -92,4 +93,5 @@ pub enum TypeError {
     InjNotASum(Type<TypeCheckStage>),
     SumNotEnoughBranch(Type<TypeCheckStage>, usize),
     NonUnrollableType(Type<TypeCheckStage>),
+    ExpectedFunction(Expr<TypeCheckStage>, Type<TypeCheckStage>),
 }

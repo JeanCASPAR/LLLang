@@ -173,6 +173,7 @@ impl TypeChecker {
         Ok((ty, annotation))
     }
 
+    /// bindings will contain the newly binded variables
     fn check_pattern(
         &self,
         (pattern, annotation): (Pattern<ParserStage>, <ParserStage as Annotation>::Pattern),
@@ -320,19 +321,17 @@ impl TypeChecker {
     fn check_expr(
         &self,
         (expr, annotation): (Expr<ParserStage>, <ParserStage as Annotation>::Expr),
-        bindings: &mut HashMap<usize, Type<TypeCheckStage>>,
+        bindings: &mut HashMap<usize, (Type<TypeCheckStage>, GlobalLoc)>,
         local_types: &'_ mut ScopedStack<usize, (usize, GlobalLoc)>,
     ) -> Result<(Expr<TypeCheckStage>, <TypeCheckStage as Annotation>::Expr), Error> {
         let (e, ty) = match expr {
             Expr::Integer(n) => (Expr::Integer(n), Type::Int),
             Expr::Ident(id) => {
-                let Some(ty) = bindings.get(&id.name).cloned() else {
-                    return Err(Error {
-                        error_type: TypeError::UnknownVariable(id.name)
-                            .into(),
-                        loc: annotation
-                    });
-                };
+                let (ty, _) = bindings.get(&id.name).cloned().ok_or(Error {
+                    error_type: TypeError::UnknownVariable(id.name).into(),
+                    loc: annotation,
+                })?;
+
                 if !matches!(ty, Type::OfCourse(_)) {
                     bindings.remove(&id.name);
                 }
@@ -401,18 +400,174 @@ impl TypeChecker {
                 let unrolled_ty = (e.1).1.clone().unroll();
                 (Expr::Unroll(Box::new(e)), unrolled_ty)
             }
-            // TODO: ici il faut faire de l'inférence de type, pas le choix
-            Expr::App(_, _) => todo!(),
-            // TODO: idem
-            Expr::Let(_, _, _) => todo!(),
-            // TODO: idem
-            Expr::LetOfCourse(_, _, _) => todo!(),
+            Expr::App(e1, e2) => {
+                let e1 = self.check_expr(*e1, bindings, local_types)?;
+                let e2 = self.check_expr(*e2, bindings, local_types)?;
+
+                let Type::Impl(ty1, ty2) = (e1.1).1.clone()
+                else {
+                    return Err(Error {
+                        error_type: TypeError::ExpectedFunction(e1.0, (e1.1).1).into(),
+                        loc: (e1.1).0,
+                    });
+                };
+                let ty1 = ty1.0;
+                let ty2 = ty2.0;
+
+                if !(e2.1).1.eq(&ty1, &self.known_types) {
+                    return Err(Error {
+                        error_type: TypeError::MismatchedType(ty1, (e2.1).1).into(),
+                        loc: (e2.1).0,
+                    });
+                }
+
+                (Expr::App(Box::new(e1), Box::new(e2)), ty2)
+            }
+            Expr::Let(pat, e1, e2) => {
+                let e1 = self.check_expr(*e1, bindings, local_types)?;
+
+                let mut pat_bindings = HashMap::new();
+                let pat = self.check_pattern(pat, &(e1.1).1, true, &mut pat_bindings)?;
+
+                for (var, (ty, loc)) in pat_bindings {
+                    match bindings.entry(var) {
+                        Entry::Occupied(e) => {
+                            let (old_ty, prev_loc) = e.remove();
+                            if !matches!(old_ty, Type::OfCourse(_)) {
+                                return Err(Error {
+                                    error_type: TypeError::MultipleBindingPattern(var, prev_loc)
+                                        .into(),
+                                    loc: loc,
+                                });
+                            }
+                        }
+                        Entry::Vacant(e) => {
+                            e.insert((ty, loc));
+                        }
+                    }
+                }
+
+                let e2 = self.check_expr(*e2, bindings, local_types)?;
+                let ty = (e2.1).1.clone();
+
+                (Expr::Let(pat, Box::new(e1), Box::new(e2)), ty)
+            }
+            Expr::LetOfCourse(x, y, e) => {
+                let (ty, _) = bindings.get(&y.name).cloned().ok_or(Error {
+                    error_type: TypeError::UnknownVariable(y.name).into(),
+                    loc: y.loc,
+                })?;
+                let Type::OfCourse(ty) = ty
+                else {
+                    return Err(Error {
+                        error_type: TypeError::DuplicateLinearExpression(y.name).into(),
+                        loc: y.loc,
+                    });
+                };
+
+                match bindings.entry(x.name) {
+                    Entry::Occupied(e) => {
+                        let (old_ty, prev_loc) = e.remove();
+                        if !matches!(old_ty, Type::OfCourse(_)) {
+                            return Err(Error {
+                                error_type: TypeError::MultipleBindingPattern(x.name, prev_loc)
+                                    .into(),
+                                loc: x.loc,
+                            });
+                        }
+                    }
+                    Entry::Vacant(e) => {
+                        e.insert((ty.0, x.loc));
+                    }
+                }
+
+                let e = self.check_expr(*e, bindings, local_types)?;
+                let ty = (e.1).1.clone();
+
+                (Expr::LetOfCourse(x, y, Box::new(e)), ty)
+            }
             // TODO: idem
             Expr::OfCourseLet(_, _, _) => todo!(),
-            Expr::Neg(_) => todo!(),
-            Expr::BinOp(_, _, _) => todo!(),
+            Expr::Neg(e) => {
+                let e = self.check_expr(*e, bindings, local_types)?;
+                if !(e.1).1.eq(&Type::Int, &self.known_types) {
+                    return Err(Error {
+                        error_type: TypeError::MismatchedType(Type::Int, (e.1).1).into(),
+                        loc: annotation,
+                    });
+                }
+
+                (Expr::Neg(Box::new(e)), Type::Int)
+            }
+            Expr::BinOp(op, e1, e2) => {
+                let e1 = self.check_expr(*e1, bindings, local_types)?;
+                if !(e1.1).1.eq(&Type::Int, &self.known_types) {
+                    return Err(Error {
+                        error_type: TypeError::MismatchedType(Type::Int, (e1.1).1).into(),
+                        loc: annotation,
+                    });
+                }
+
+                let e2 = self.check_expr(*e2, bindings, local_types)?;
+                if !(e2.1).1.eq(&Type::Int, &self.known_types) {
+                    return Err(Error {
+                        error_type: TypeError::MismatchedType(Type::Int, (e2.1).1).into(),
+                        loc: annotation,
+                    });
+                }
+
+                (Expr::BinOp(op, Box::new(e1), Box::new(e2)), Type::Int)
+            }
             Expr::Fun(_) => todo!(),
-            Expr::Match(_, _) => todo!(),
+            Expr::Match(e, branches) => {
+                let e = self.check_expr(*e, bindings, local_types)?;
+                let mut common_ty = None;
+                let mut new_branches = Vec::new();
+                for branch in branches {
+                    let (pat, e_branch) = branch;
+                    let mut pat_bindings = HashMap::new();
+
+                    let pat = self.check_pattern(pat, &(e.1).1, false, &mut pat_bindings)?;
+
+                    for (var, (ty, loc)) in pat_bindings {
+                        match bindings.entry(var) {
+                            Entry::Occupied(e) => {
+                                let (old_ty, prev_loc) = e.remove();
+                                if !matches!(old_ty, Type::OfCourse(_)) {
+                                    return Err(Error {
+                                        error_type: TypeError::MultipleBindingPattern(
+                                            var, prev_loc,
+                                        )
+                                        .into(),
+                                        loc: loc,
+                                    });
+                                }
+                            }
+                            Entry::Vacant(e) => {
+                                e.insert((ty, loc));
+                            }
+                        }
+                    }
+
+                    let e_branch = self.check_expr(e_branch, bindings, local_types)?;
+                    if let Some(ref common_ty) = common_ty {
+                        if !(e_branch.1).1.eq(common_ty, &self.known_types) {
+                            return Err(Error {
+                                error_type: TypeError::MismatchedType(common_ty.clone(), e.1 .1)
+                                    .into(),
+                                loc: annotation,
+                            });
+                        }
+                    } else {
+                        common_ty = Some((e_branch.1).1.clone());
+                    }
+                    new_branches.push((pat, e_branch));
+                }
+
+                // TODO: check d'exhaustivité + vérification que les variables
+                // utilisée dans une branche le sont dans toutes les branches
+                (Expr::Match(Box::new(e), new_branches), common_ty.unwrap())
+            }
         };
         Ok((e, (annotation, ty)))
     }
