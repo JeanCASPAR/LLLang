@@ -8,4 +8,3 @@ edition = "2021"
 [dependencies]
 pest = "2"
 pest_derive = "2"
-scoped_stack = "1"

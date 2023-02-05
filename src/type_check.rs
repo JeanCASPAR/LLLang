@@ -1,7 +1,5 @@
 #![allow(dead_code)]
 
-use scoped_stack::ScopedStack;
-
 use std::collections::{hash_map::Entry, HashMap};
 
 use crate::{ast::*, error::*, misc::*, parser::ParserStage};
@@ -78,20 +76,11 @@ impl TypeChecker {
     }
 
     /// Translate a type to the next stage, if it is correct
+    /// `local_types` stores the type variables already encountered
     fn check_type(
         &self,
-        ty: (Type<ParserStage>, <ParserStage as Annotation>::Type),
-    ) -> Result<(Type<TypeCheckStage>, <TypeCheckStage as Annotation>::Type), Error> {
-        self.real_check_type(ty, &mut ScopedStack::new(), 0)
-    }
-
-    /// Same as check type, but take a parameter storing the
-    /// type variables already encountered
-    fn real_check_type(
-        &self,
         (ty, annotation): (Type<ParserStage>, <ParserStage as Annotation>::Type),
-        local_types: &'_ mut ScopedStack<usize, (usize, GlobalLoc)>,
-        level: usize,
+        local_types: &'_ mut Scope<usize, (usize, GlobalLoc)>,
     ) -> Result<(Type<TypeCheckStage>, <TypeCheckStage as Annotation>::Type), Error> {
         local_types.push_scope();
         let ty = match ty {
@@ -99,7 +88,7 @@ impl TypeChecker {
             Type::Ident(name) => match local_types.get(&name.name) {
                 Some((original_level, parent_loc)) => Type::TypeVar(DeBruijnIndex::new(
                     name,
-                    level - original_level,
+                    local_types.depth() - original_level,
                     *parent_loc,
                 )),
                 // we unfold all type definitions
@@ -115,7 +104,7 @@ impl TypeChecker {
             },
             Type::TypeVar(absurd) => match absurd {},
             Type::Param(name, params, ()) => {
-                if local_types.has(&name.name) {
+                if local_types.contains_key(&name.name) {
                     return Err(Error {
                         error_type: TypeError::TypeVarWithParam(name.name).into(),
                         loc: name.loc,
@@ -123,10 +112,7 @@ impl TypeChecker {
                 };
                 let params = params
                     .into_iter()
-                    .map(|ty| {
-                        self.real_check_type(ty, local_types, level)
-                            .map(|(ty, _)| ty)
-                    })
+                    .map(|ty| self.check_type(ty, local_types).map(|(ty, _)| ty))
                     .collect::<Result<Vec<_>, _>>()?;
 
                 self.assert_type_ident_arity(name, params.len()).map(|()| {
@@ -136,37 +122,37 @@ impl TypeChecker {
             }
             Type::Unit => Type::Unit,
             Type::Never => Type::Never,
-            Type::OfCourse(ty) => {
-                Type::OfCourse(Box::new(self.real_check_type(*ty, local_types, level)?))
-            }
-            // Type::WhyNot(ty) => Type::WhyNot(Box::new(self.real_check_type(*ty, name_map, level)?)),
+            Type::OfCourse(ty) => Type::OfCourse(Box::new(self.check_type(*ty, local_types)?)),
+            // Type::WhyNot(ty) => Type::WhyNot(Box::new(self.real_check_type(*ty, name_map)?)),
             Type::Tuple(ty) => Type::Tuple(
                 ty.into_iter()
-                    .map(|param| self.real_check_type(param, local_types, level))
+                    .map(|param| self.check_type(param, local_types))
                     .collect::<Result<_, _>>()?,
             ),
             Type::Sum(ty) => Type::Sum(
                 ty.into_iter()
-                    .map(|param| self.real_check_type(param, local_types, level))
+                    .map(|param| self.check_type(param, local_types))
                     .collect::<Result<_, _>>()?,
             ),
             Type::Impl(ty1, ty2) => Type::Impl(
-                Box::new(self.real_check_type(*ty1, local_types, level)?),
-                Box::new(self.real_check_type(*ty2, local_types, level)?),
+                Box::new(self.check_type(*ty1, local_types)?),
+                Box::new(self.check_type(*ty2, local_types)?),
             ),
             Type::Mu(ty_var, ty) => {
-                local_types.insert(ty_var.name, (level, ty_var.loc));
-                Type::Mu(
-                    ty_var,
-                    Box::new(self.real_check_type(*ty, local_types, level + 1)?),
-                )
+                local_types.insert(
+                    ty_var.name,
+                    (local_types.depth(), ty_var.loc),
+                    !matches!(ty.0, Type::OfCourse(_)),
+                );
+                Type::Mu(ty_var, Box::new(self.check_type(*ty, local_types)?))
             }
             Type::Forall(ty_var, ty) => {
-                local_types.insert(ty_var.name, (level, ty_var.loc));
-                Type::Forall(
-                    ty_var,
-                    Box::new(self.real_check_type(*ty, local_types, level + 1)?),
-                )
+                local_types.insert(
+                    ty_var.name,
+                    (local_types.depth(), ty_var.loc),
+                    !matches!(ty.0, Type::OfCourse(_)),
+                );
+                Type::Forall(ty_var, Box::new(self.check_type(*ty, local_types)?))
             }
         };
         local_types.pop_scope();
@@ -322,7 +308,7 @@ impl TypeChecker {
         &self,
         (expr, annotation): (Expr<ParserStage>, <ParserStage as Annotation>::Expr),
         bindings: &mut HashMap<usize, (Type<TypeCheckStage>, GlobalLoc)>,
-        local_types: &'_ mut ScopedStack<usize, (usize, GlobalLoc)>,
+        local_types: &'_ mut Scope<usize, (usize, GlobalLoc)>,
     ) -> Result<(Expr<TypeCheckStage>, <TypeCheckStage as Annotation>::Expr), Error> {
         let (e, ty) = match expr {
             Expr::Integer(n) => (Expr::Integer(n), Type::Int),
@@ -341,8 +327,7 @@ impl TypeChecker {
             Expr::Param(e, params) => {
                 let params = params
                     .into_iter()
-                    // TODO: not zero!
-                    .map(|ty| self.real_check_type(ty, local_types, 0))
+                    .map(|ty| self.check_type(ty, local_types))
                     .collect::<Result<Vec<_>, _>>()?;
                 let e = self.check_expr(*e, bindings, local_types)?;
                 let (mut loc, mut ty) = e.1.clone();
@@ -359,8 +344,7 @@ impl TypeChecker {
             }
             Expr::Unit => (Expr::Unit, Type::Unit),
             Expr::Inj(ty, branch, e) => {
-                // TODO: not zero!
-                let (ty, ty_loc) = self.real_check_type(ty, local_types, 0)?;
+                let (ty, ty_loc) = self.check_type(ty, local_types)?;
                 let Type::Sum(mut ty) = ty
                 else {
                     return Err(Error {
@@ -389,8 +373,7 @@ impl TypeChecker {
                 )
             }
             Expr::Roll(ty, e) => {
-                // TODO: not zero!
-                let (ty, ty_loc) = self.real_check_type(ty, local_types, 0)?;
+                let (ty, ty_loc) = self.check_type(ty, local_types)?;
                 if !matches!(ty, Type::Mu(_, _)) {
                     return Err(Error {
                         error_type: TypeError::NonUnrollableType(ty).into(),
