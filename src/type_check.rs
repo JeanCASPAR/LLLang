@@ -38,10 +38,11 @@ pub struct TypeCheckStage;
 
 impl Annotation for TypeCheckStage {
     type Ident = ParseIdent;
+    type TIdent = Never;
     type TypeVar = DeBruijnIndex;
     type QTypeVar = ParseIdent;
     type TypeParam = Never;
-    type Expr = GlobalLoc;
+    type Expr = (GlobalLoc, Type<TypeCheckStage>);
     type Pattern = GlobalLoc;
     type Type = GlobalLoc;
     type FunDef = GlobalLoc;
@@ -101,10 +102,16 @@ impl TypeChecker {
                     level - original_level,
                     *parent_loc,
                 )),
+                // we unfold all type definitions
                 None => self
-                    .assert_type_ident_arity(name, 0)
-                    // We don't get rid of Type::Ident because it is simpler to handle non parametized types
-                    .map(|_| Type::Ident(name))?,
+                    .known_types
+                    .get(&name.name)
+                    .ok_or(Error {
+                        error_type: TypeError::UnknownType(name.name).into(),
+                        loc: name.loc,
+                    })?
+                    .0
+                    .clone(),
             },
             Type::TypeVar(absurd) => match absurd {},
             Type::Param(name, params, ()) => {
@@ -313,64 +320,32 @@ impl TypeChecker {
     fn check_expr(
         &self,
         (expr, annotation): (Expr<ParserStage>, <ParserStage as Annotation>::Expr),
-        expected_type: &Type<TypeCheckStage>,
         bindings: &mut HashMap<usize, Type<TypeCheckStage>>,
         local_types: &'_ mut ScopedStack<usize, (usize, GlobalLoc)>,
     ) -> Result<(Expr<TypeCheckStage>, <TypeCheckStage as Annotation>::Expr), Error> {
-        let e = match expr {
-            Expr::Integer(n) => {
-                if !matches!(expected_type, Type::Int) {
-                    return Err(Error {
-                        error_type: TypeError::MismatchedType(Type::Int, expected_type.clone())
-                            .into(),
-                        loc: annotation,
-                    });
-                }
-                Expr::Integer(n)
-            }
+        let (e, ty) = match expr {
+            Expr::Integer(n) => (Expr::Integer(n), Type::Int),
             Expr::Ident(id) => {
-                let Some(ty) = bindings.get(&id.name) else {
+                let Some(ty) = bindings.get(&id.name).cloned() else {
                     return Err(Error {
-                        error_type: TypeError::UnknownVariable(id.name, expected_type.clone())
+                        error_type: TypeError::UnknownVariable(id.name)
                             .into(),
                         loc: annotation
                     });
                 };
-                if ty.eq(expected_type, &self.known_types) {
-                    return Err(Error {
-                        error_type: TypeError::MismatchedType(ty.clone(), expected_type.clone())
-                            .into(),
-                        loc: annotation,
-                    });
-                }
-                if !matches!(expected_type, Type::OfCourse(_)) {
+                if !matches!(ty, Type::OfCourse(_)) {
                     bindings.remove(&id.name);
                 }
 
-                Expr::Ident(id)
+                (Expr::Ident(id), ty)
             }
+            // TODO: il faut de l'inférence de type
             Expr::Param(_, _) => todo!(),
-            Expr::Unit => {
-                if !matches!(expected_type, Type::Unit) {
-                    return Err(Error {
-                        error_type: TypeError::MismatchedType(Type::Unit, expected_type.clone())
-                            .into(),
-                        loc: annotation,
-                    });
-                }
-
-                Expr::Unit
-            }
+            Expr::Unit => (Expr::Unit, Type::Unit),
             Expr::Inj(ty, branch, e) => {
                 // TODO: not zero!
                 let (ty, ty_loc) = self.real_check_type(ty, local_types, 0)?;
-                if !ty.eq(expected_type, &self.known_types) {
-                    return Err(Error {
-                        error_type: TypeError::MismatchedType(ty, expected_type.clone()).into(),
-                        loc: annotation,
-                    });
-                }
-                let Type::Sum(ty) = ty
+                let Type::Sum(mut ty) = ty
                 else {
                     return Err(Error {
                         error_type: TypeError::InjNotASum(ty).into(),
@@ -384,8 +359,18 @@ impl TypeChecker {
                     });
                 }
 
-                let e = self.check_expr(*e, &ty[branch].0, bindings, local_types)?;
-                Expr::Inj((Type::Sum(ty), ty_loc), branch, Box::new(e))
+                let e = self.check_expr(*e, bindings, local_types)?;
+                if !(e.1).1.eq(&ty[branch].0, &self.known_types) {
+                    return Err(Error {
+                        error_type: TypeError::MismatchedType(ty.swap_remove(branch).0, e.1 .1)
+                            .into(),
+                        loc: annotation,
+                    });
+                }
+                (
+                    Expr::Inj((Type::Sum(ty.clone()), ty_loc), branch, Box::new(e)),
+                    Type::Sum(ty),
+                )
             }
             Expr::Roll(ty, e) => {
                 let (ty, ty_loc) = self.real_check_type(ty, local_types, 0)?;
@@ -395,39 +380,41 @@ impl TypeChecker {
                         loc: annotation,
                     });
                 }
+                let e = self.check_expr(*e, bindings, local_types)?;
                 let unrolled_ty = ty.clone().unroll();
-                if !unrolled_ty.eq(&expected_type, &self.known_types) {
+                if !unrolled_ty.eq(&(e.1).1, &self.known_types) {
                     return Err(Error {
-                        error_type: TypeError::MismatchedType(unrolled_ty, expected_type.clone())
-                            .into(),
+                        error_type: TypeError::MismatchedType(unrolled_ty, (e.1).1).into(),
                         loc: annotation,
                     });
                 }
-                let e = self.check_expr(*e, &ty, bindings, local_types)?;
-                Expr::Roll((ty, ty_loc), Box::new(e))
+                (Expr::Roll((ty.clone(), ty_loc), Box::new(e)), ty)
             }
             Expr::Unroll(e) => {
-                if !matches!(expected_type, Type::Mu(_, _)) {
+                let e = self.check_expr(*e, bindings, local_types)?;
+                if !matches!((e.1).1, Type::Mu(_, _)) {
                     return Err(Error {
-                        error_type: TypeError::NonUnrollableType(expected_type.clone()).into(),
+                        error_type: TypeError::NonUnrollableType((e.1).1).into(),
                         loc: annotation,
                     });
                 }
-                let unrolled_ty = expected_type.clone().unroll();
-                let e = self.check_expr(*e, &unrolled_ty, bindings, local_types)?;
-                Expr::Unroll(Box::new(e))
+                let unrolled_ty = (e.1).1.clone().unroll();
+                (Expr::Unroll(Box::new(e)), unrolled_ty)
             }
             // TODO: ici il faut faire de l'inférence de type, pas le choix
             Expr::App(_, _) => todo!(),
+            // TODO: idem
             Expr::Let(_, _, _) => todo!(),
+            // TODO: idem
             Expr::LetOfCourse(_, _, _) => todo!(),
+            // TODO: idem
             Expr::OfCourseLet(_, _, _) => todo!(),
             Expr::Neg(_) => todo!(),
             Expr::BinOp(_, _, _) => todo!(),
             Expr::Fun(_) => todo!(),
             Expr::Match(_, _) => todo!(),
         };
-        Ok((e, annotation))
+        Ok((e, (annotation, ty)))
     }
 }
 
@@ -439,10 +426,7 @@ impl Type<TypeCheckStage> {
     ) -> bool {
         match (self, other) {
             (Type::Int, Type::Int) => true,
-            (Type::Ident(id1), Type::Ident(id2)) if id1.name == id2.name => true,
-            (Type::Ident(id), ty) | (ty, Type::Ident(id)) => {
-                known_types.get(&id.name).unwrap().0.eq(ty, known_types)
-            }
+            (Type::Ident(absurd), _) | (_, Type::Ident(absurd)) => match *absurd {},
             (Type::TypeVar(ty_var1), Type::TypeVar(ty_var2)) => ty_var1.idx == ty_var2.idx,
             (Type::Param(_, _, absurd), _) | (_, Type::Param(_, _, absurd)) => match *absurd {},
             (Type::Unit, Type::Unit) => true,

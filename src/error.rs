@@ -88,7 +88,7 @@ pub enum TypeError {
     MultipleBindingPattern(usize, GlobalLoc),
     /// Expected [first], got [second]
     MismatchedType(Type<TypeCheckStage>, Type<TypeCheckStage>),
-    UnknownVariable(usize, Type<TypeCheckStage>),
+    UnknownVariable(usize),
     InjNotASum(Type<TypeCheckStage>),
     SumNotEnoughBranch(Type<TypeCheckStage>, usize),
     NonUnrollableType(Type<TypeCheckStage>),

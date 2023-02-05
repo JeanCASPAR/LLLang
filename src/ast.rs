@@ -2,6 +2,7 @@ use std::{collections::HashMap, fmt::Debug};
 
 pub trait Annotation {
     type Ident: Debug + Clone;
+    type TIdent: Debug + Clone;
     type TypeVar: Debug + Clone;
     /// Q stands for "quantified"
     type QTypeVar: Debug + Clone;
@@ -16,7 +17,7 @@ pub trait Annotation {
 #[derive(Debug, Clone)]
 pub enum Type<A: Annotation> {
     Int,
-    Ident(A::Ident),
+    Ident(A::TIdent),
     TypeVar(A::TypeVar),
     Param(A::Ident, Vec<(Type<A>, A::Type)>, A::TypeParam),
     Unit,
