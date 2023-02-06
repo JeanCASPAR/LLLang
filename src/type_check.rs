@@ -43,7 +43,7 @@ impl Annotation for TypeCheckStage {
     type Expr = (Type<TypeCheckStage>, GlobalLoc);
     type Pattern = GlobalLoc;
     type Type = GlobalLoc;
-    type FunDef = GlobalLoc;
+    type FunDef = (Type<TypeCheckStage>, GlobalLoc);
     type Item = GlobalLoc;
 }
 
@@ -82,7 +82,6 @@ impl TypeChecker {
         (ty, annotation): (Type<ParserStage>, <ParserStage as Annotation>::Type),
         local_types: &'_ mut Scope<usize, (usize, GlobalLoc)>,
     ) -> Result<(Type<TypeCheckStage>, <TypeCheckStage as Annotation>::Type), Error> {
-        local_types.push_scope();
         let ty = match ty {
             Type::Int => Type::Int,
             Type::Ident(name) => match local_types.get(&name.name) {
@@ -144,7 +143,10 @@ impl TypeChecker {
                     (local_types.depth(), ty_var.loc),
                     !matches!(ty.0, Type::OfCourse(_)),
                 );
-                Type::Mu(ty_var, Box::new(self.check_type(*ty, local_types)?))
+                local_types.push_scope();
+                let ty = Type::Mu(ty_var, Box::new(self.check_type(*ty, local_types)?));
+                local_types.pop_scope();
+                ty
             }
             Type::Forall(ty_var, ty) => {
                 local_types.insert(
@@ -152,7 +154,10 @@ impl TypeChecker {
                     (local_types.depth(), ty_var.loc),
                     !matches!(ty.0, Type::OfCourse(_)),
                 );
-                Type::Forall(ty_var, Box::new(self.check_type(*ty, local_types)?))
+                local_types.push_scope();
+                let ty = Type::Forall(ty_var, Box::new(self.check_type(*ty, local_types)?));
+                local_types.pop_scope();
+                ty
             }
         };
         local_types.pop_scope();
@@ -508,7 +513,11 @@ impl TypeChecker {
 
                 (Expr::BinOp(op, Box::new(e1), Box::new(e2)), Type::Int)
             }
-            Expr::Fun(_) => todo!(),
+            Expr::Fun(fun_def) => {
+                let fun_def = self.check_fun_def(*fun_def, bindings, local_types)?;
+                let ty = (fun_def.1).0.clone();
+                (Expr::Fun(Box::new(fun_def)), ty)
+            }
             Expr::Match(e, branches) => {
                 let e = self.check_expr(*e, bindings, local_types)?;
                 let mut common_ty = None;
@@ -578,6 +587,88 @@ impl TypeChecker {
         let linear = !matches!(ty, Type::OfCourse(_));
         bindings.insert(var, (ty, loc), linear);
         Ok(())
+    }
+
+    fn check_fun_def(
+        &self,
+        (fun_def, annotation): (FunDef<ParserStage>, <ParserStage as Annotation>::FunDef),
+        bindings: &mut Scope<usize, (Type<TypeCheckStage>, GlobalLoc)>,
+        local_types: &'_ mut Scope<usize, (usize, GlobalLoc)>,
+    ) -> Result<
+        (
+            FunDef<TypeCheckStage>,
+            <TypeCheckStage as Annotation>::FunDef,
+        ),
+        Error,
+    > {
+        let mut vars = fun_def.ty_var.clone();
+        vars.sort_unstable_by_key(|var| var.name);
+        vars.dedup_by_key(|var| var.name);
+        if vars.len() != fun_def.ty_var.len() {
+            return Err(Error {
+                error_type: TypeError::DuplicateTypeParameter.into(),
+                loc: annotation,
+            });
+        }
+
+        for ty_var in &fun_def.ty_var {
+            local_types.insert(ty_var.name, (local_types.depth(), ty_var.loc), false);
+            local_types.push_scope();
+        }
+
+        let ret_ty = self.check_type(fun_def.ret_ty, local_types)?;
+
+        let mut arg_bindings = HashMap::new();
+        let mut patterns = Vec::with_capacity(fun_def.args.len());
+        let mut types = Vec::with_capacity(fun_def.args.len());
+        for (pat, ty) in fun_def.args {
+            let ty = self.check_type(ty, local_types)?;
+            let pat = self.check_pattern(pat, &ty.0, true, &mut arg_bindings)?;
+            patterns.push(pat);
+            types.push(ty);
+        }
+
+        let ty = types.iter().cloned().rev().fold(ret_ty.clone(), |acc, ty| {
+            let loc = ty.1;
+            (Type::Impl(Box::new(ty), Box::new(acc)), loc)
+        });
+
+        let args = patterns.into_iter().zip(types).collect();
+
+        if fun_def.rec {
+            Self::linear_insert(
+                fun_def.name.unwrap().name,
+                ty.0.clone(),
+                fun_def.name.unwrap().loc,
+                bindings,
+            )?;
+        }
+
+        bindings.push_scope();
+        let body = self.check_expr(fun_def.body, bindings, local_types)?;
+        bindings.pop_scope();
+
+        if !(body.1).0.eq(&ret_ty.0, &self.known_types) {
+            return Err(Error {
+                error_type: TypeError::MismatchedType(ret_ty.0, (body.1).0).into(),
+                loc: annotation,
+            });
+        }
+
+        for _ in 0..fun_def.ty_var.len() {
+            local_types.pop_scope();
+        }
+
+        let fun_def = FunDef {
+            name: fun_def.name,
+            ty_var: fun_def.ty_var,
+            args,
+            ret_ty,
+            body,
+            rec: fun_def.rec,
+        };
+
+        Ok((fun_def, (ty.0, annotation)))
     }
 }
 

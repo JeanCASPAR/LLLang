@@ -97,4 +97,5 @@ pub enum TypeError {
     /// The type is not a forall
     NonParametableType(Type<TypeCheckStage>),
     NonUsedLinearVar(usize, Type<TypeCheckStage>),
+    DuplicateTypeParameter,
 }
