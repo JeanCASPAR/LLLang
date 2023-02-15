@@ -38,6 +38,7 @@ impl GlobalLoc {
 mod scope {
     use std::{borrow::Borrow, collections::HashMap, hash::Hash};
 
+    #[derive(Clone)]
     pub struct Scope<K, V> {
         current: HashMap<K, (V, bool)>,
         parents: Vec<HashMap<K, (V, bool)>>,

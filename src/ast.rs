@@ -2,6 +2,7 @@ use std::{collections::HashMap, fmt::Debug};
 
 pub trait Annotation {
     type Ident: Debug + Clone;
+    type EIdent: Debug + Clone;
     type TIdent: Debug + Clone;
     type TypeVar: Debug + Clone;
     /// Q stands for "quantified"
@@ -19,7 +20,7 @@ pub enum Type<A: Annotation> {
     Int,
     Ident(A::TIdent),
     TypeVar(A::TypeVar),
-    Param(A::Ident, Vec<(Type<A>, A::Type)>, A::TypeParam),
+    Param(A::TIdent, Vec<(Type<A>, A::Type)>, A::TypeParam),
     Unit,
     Never,
     OfCourse(Box<(Type<A>, A::Type)>),
@@ -96,7 +97,7 @@ pub struct FunDef<A: Annotation> {
 #[derive(Debug, Clone)]
 pub enum Item<A: Annotation> {
     FunDef((FunDef<A>, A::FunDef)),
-    TypeDef(A::Ident, (Type<A>, A::Type)),
+    TypeDef(A::TIdent, (Type<A>, A::Type)),
 }
 
 #[derive(Debug, Clone)]

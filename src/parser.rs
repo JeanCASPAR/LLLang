@@ -30,6 +30,7 @@ pub struct ParserStage;
 
 impl Annotation for ParserStage {
     type Ident = ParseIdent;
+    type EIdent = ParseIdent;
     type TIdent = ParseIdent;
     type TypeVar = Never;
     type QTypeVar = ParseIdent;

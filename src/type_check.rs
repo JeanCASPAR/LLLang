@@ -36,9 +36,10 @@ pub struct TypeCheckStage;
 
 impl Annotation for TypeCheckStage {
     type Ident = ParseIdent;
+    type EIdent = ParseIdent;
     type TIdent = Never;
     type TypeVar = DeBruijnIndex;
-    type QTypeVar = ParseIdent;
+    type QTypeVar = ();
     type TypeParam = Never;
     type Expr = (Type<TypeCheckStage>, GlobalLoc);
     type Pattern = GlobalLoc;
@@ -144,7 +145,7 @@ impl TypeChecker {
                     !matches!(ty.0, Type::OfCourse(_)),
                 );
                 local_types.push_scope();
-                let ty = Type::Mu(ty_var, Box::new(self.check_type(*ty, local_types)?));
+                let ty = Type::Mu((), Box::new(self.check_type(*ty, local_types)?));
                 local_types.pop_scope();
                 ty
             }
@@ -155,7 +156,7 @@ impl TypeChecker {
                     !matches!(ty.0, Type::OfCourse(_)),
                 );
                 local_types.push_scope();
-                let ty = Type::Forall(ty_var, Box::new(self.check_type(*ty, local_types)?));
+                let ty = Type::Forall((), Box::new(self.check_type(*ty, local_types)?));
                 local_types.pop_scope();
                 ty
             }
@@ -521,6 +522,7 @@ impl TypeChecker {
             Expr::Match(e, branches) => {
                 let e = self.check_expr(*e, bindings, local_types)?;
                 let mut common_ty = None;
+                let mut post_bindings = None;
                 let mut new_branches = Vec::new();
                 for branch in branches {
                     let (pat, e_branch) = branch;
@@ -532,7 +534,28 @@ impl TypeChecker {
                         Self::linear_insert(var, ty, loc, bindings)?;
                     }
 
-                    let e_branch = self.check_expr(e_branch, bindings, local_types)?;
+                    let mut match_bindings = bindings.clone();
+                    match_bindings.push_scope();
+                    let e_branch = self.check_expr(e_branch, &mut match_bindings, local_types)?;
+                    let match_bindings = match_bindings.pop_scope();
+                    if let Some(ref post_bindings) = post_bindings {
+                        // TODO: trouver si des variables sont utilisées dans certaines branches mais pas toutes
+                    } else {
+                        post_bindings = Some(match_bindings.clone());
+                    }
+                    for (name, ((ty, loc), linear)) in match_bindings {
+                        if linear {
+                            return Err(Error {
+                                error_type: TypeError::DiscardLinearExpr(
+                                    Pattern::Ident(ParseIdent { name, loc }),
+                                    ty,
+                                )
+                                .into(),
+                                loc,
+                            });
+                        }
+                    }
+
                     if let Some(ref common_ty) = common_ty {
                         if !(e_branch.1).0.eq(common_ty, &self.known_types) {
                             return Err(Error {
@@ -669,6 +692,10 @@ impl TypeChecker {
         };
 
         Ok((fun_def, (ty.0, annotation)))
+    }
+
+    fn is_pattern_matching_exhaustive(_patterns: &[Pattern<TypeCheckStage>]) -> bool {
+        todo!()
     }
 }
 
