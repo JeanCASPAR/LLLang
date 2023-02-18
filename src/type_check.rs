@@ -183,7 +183,7 @@ impl TypeChecker {
                 );
                 local_types.push_scope();
                 let ty = Type::Mu((), Box::new(self.check_type(*ty, local_types)?));
-                local_types.pop_scope();
+                let _ = local_types.pop_scope();
                 ty
             }
             Type::Forall(ty_var, ty) => {
@@ -194,11 +194,10 @@ impl TypeChecker {
                 );
                 local_types.push_scope();
                 let ty = Type::Forall((), Box::new(self.check_type(*ty, local_types)?));
-                local_types.pop_scope();
+                let _ = local_types.pop_scope();
                 ty
             }
         };
-        local_types.pop_scope();
         Ok((ty, annotation))
     }
 
@@ -395,7 +394,7 @@ impl TypeChecker {
                     .map(|ty| self.check_type(ty, local_types))
                     .collect::<Result<Vec<_>, _>>()?;
                 let e = self.check_expr(*e, bindings, stack_size, depth, local_types)?;
-                let (mut ty, mut loc, used_var, stack_size) = e.1.clone();
+                let (mut ty, mut loc, used_var, max_stack_size) = e.1.clone();
                 for _ in 0..params.len() {
                     let Type::Forall(_, tybis) = ty
                     else {
@@ -405,7 +404,6 @@ impl TypeChecker {
                     loc = tybis.1;
                 }
                 let ty = ty.real_specialize(params.iter().map(|(ty, _)| ty.clone()).collect(), 0);
-                let max_stack_size = (e.1).3;
                 (
                     Expr::Param(Box::new(e), params),
                     ty,
@@ -680,7 +678,6 @@ impl TypeChecker {
 
                 let mut used_var = (e.1).2.clone();
                 let mut common_ty = None;
-                let mut new_bindings = None;
                 let mut used_variables_in_branch: Option<HashMap<_, _>> = None;
                 let mut new_branches = Vec::new();
                 let mut max_stack = (e.1).3;
@@ -712,7 +709,7 @@ impl TypeChecker {
                         local_types,
                     )?;
                     let scope = match_bindings.pop_scope();
-                    Self::assert_scope_clean(scope);
+                    Self::assert_scope_clean(scope)?;
 
                     if let Some(ref common_ty) = common_ty {
                         if !(e_branch.1).0.eq(common_ty, &self.known_types) {
@@ -729,9 +726,7 @@ impl TypeChecker {
                     // check if all branch use the same variables
                     // currently checking double inclusions with the first branch
                     // TODO: chain inclusion check
-                    if let (Some(ref new_bindings), Some(ref used_variables_in_branch)) =
-                        (&new_bindings, &used_variables_in_branch)
-                    {
+                    if let Some(ref used_variables_in_branch) = used_variables_in_branch {
                         for (var, ty) in &(e_branch.1).2 {
                             if let Type::OfCourse(_) = ty {
                                 continue;
@@ -763,8 +758,6 @@ impl TypeChecker {
                             }
                         }
                     } else {
-                        new_bindings = Some(match_bindings);
-
                         let mut tmp: HashMap<_, _> = (e_branch.1)
                             .2
                             .clone()
