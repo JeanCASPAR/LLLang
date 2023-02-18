@@ -31,18 +31,55 @@ impl DeBruijnIndex {
     }
 }
 
+/// Linear allocation, could be done better (especially since we can free space early)
+#[derive(Debug, Clone, Copy, Eq, Hash)]
+pub struct StackIdent {
+    /// number of variables above in the stack
+    pub n: usize,
+    /// number of parent functions
+    pub depth: usize,
+    /// index in global name table
+    pub real_name: usize,
+    pub loc: GlobalLoc,
+}
+
+impl StackIdent {
+    pub fn new(n: usize, depth: usize, real_name: usize, loc: GlobalLoc) -> Self {
+        Self {
+            n,
+            depth,
+            real_name,
+            loc,
+        }
+    }
+}
+
+impl PartialEq for StackIdent {
+    fn eq(&self, other: &Self) -> bool {
+        self.loc == other.loc
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct TypeCheckStage;
 
 impl Annotation for TypeCheckStage {
     type Ident = ParseIdent;
-    type EIdent = ParseIdent;
+    type EIdent = StackIdent;
     type TIdent = Never;
     type TypeVar = DeBruijnIndex;
     type QTypeVar = ();
     type TypeParam = Never;
-    type Expr = (Type<TypeCheckStage>, GlobalLoc);
-    type Pattern = GlobalLoc;
+    type Expr = (
+        Type<TypeCheckStage>,
+        GlobalLoc,
+        // variables used in the expression
+        HashMap<StackIdent, Type<TypeCheckStage>>,
+        // max stack size (in number of variables)
+        usize,
+    );
+    // max stack size
+    type Pattern = (GlobalLoc, usize);
     type Type = GlobalLoc;
     type FunDef = (Type<TypeCheckStage>, GlobalLoc);
     type Item = GlobalLoc;
@@ -171,7 +208,9 @@ impl TypeChecker {
         (pattern, annotation): (Pattern<ParserStage>, <ParserStage as Annotation>::Pattern),
         expected_type: &Type<TypeCheckStage>,
         infallible: bool,
-        bindings: &mut HashMap<usize, (Type<TypeCheckStage>, GlobalLoc)>,
+        bindings: &mut HashMap<usize, (Type<TypeCheckStage>, StackIdent)>,
+        stack_size: usize,
+        depth: usize,
     ) -> Result<
         (
             Pattern<TypeCheckStage>,
@@ -179,7 +218,7 @@ impl TypeChecker {
         ),
         Error,
     > {
-        let pat = match pattern {
+        let (pat, max_stack_size) = match pattern {
             Pattern::Discard => {
                 if !matches!(expected_type, Type::OfCourse(_)) {
                     return Err(Error {
@@ -188,7 +227,7 @@ impl TypeChecker {
                         loc: annotation,
                     });
                 }
-                Pattern::Discard
+                (Pattern::Discard, stack_size)
             }
             Pattern::Int(n) => {
                 if !matches!(expected_type, Type::Int) {
@@ -205,23 +244,25 @@ impl TypeChecker {
                         loc: annotation,
                     });
                 };
-                Pattern::Int(n)
+                (Pattern::Int(n), stack_size)
             }
             Pattern::Ident(id) => {
+                let stack_id;
                 match bindings.entry(id.name) {
                     Entry::Occupied(e) => {
-                        let (_, loc) = e.remove();
+                        let (_, var) = e.remove();
                         return Err(Error {
-                            error_type: TypeError::MultipleBindingPattern(id.name, loc).into(),
+                            error_type: TypeError::MultipleBindingPattern(id.name, var.loc).into(),
                             loc: id.loc,
                         });
                     }
                     Entry::Vacant(e) => {
-                        e.insert((expected_type.clone(), id.loc));
+                        stack_id = StackIdent::new(stack_size, depth, id.name, id.loc);
+                        e.insert((expected_type.clone(), stack_id));
                     }
                 }
 
-                Pattern::Ident(id)
+                (Pattern::Ident(stack_id), stack_size + 1)
             }
             Pattern::Unit => {
                 if !matches!(expected_type, Type::Unit) {
@@ -231,7 +272,7 @@ impl TypeChecker {
                         loc: annotation,
                     });
                 }
-                Pattern::Unit
+                (Pattern::Unit, stack_size)
             }
             Pattern::Tuple(subpatterns) => {
                 let subtypes = if let Type::Tuple(subtypes) = expected_type {
@@ -256,15 +297,21 @@ impl TypeChecker {
                         loc: annotation,
                     });
                 }
-                Pattern::Tuple(
-                    subpatterns
-                        .into_iter()
-                        .zip(subtypes)
-                        .map(|(subpat, subty)| {
-                            self.check_pattern(subpat, &subty.0, infallible, bindings)
-                        })
-                        .collect::<Result<_, _>>()?,
-                )
+                let mut new_subpatterns = Vec::new();
+                let mut max_stack_size = 0;
+                for (subpat, subty) in subpatterns.into_iter().zip(subtypes) {
+                    let (subpat, annot) = self.check_pattern(
+                        subpat,
+                        &subty.0,
+                        infallible,
+                        bindings,
+                        max_stack_size,
+                        depth,
+                    )?;
+                    max_stack_size = annot.1;
+                    new_subpatterns.push((subpat, annot));
+                }
+                (Pattern::Tuple(new_subpatterns), max_stack_size)
             }
             Pattern::Inj(nb, pat) => {
                 let subtypes = if let Type::Sum(subtypes) = expected_type {
@@ -299,44 +346,56 @@ impl TypeChecker {
                         loc: annotation,
                     });
                 }
-                Pattern::Inj(
-                    nb,
-                    Box::new(self.check_pattern(*pat, &subtypes[nb].0, infallible, bindings)?),
-                )
+                let pat = self.check_pattern(
+                    *pat,
+                    &subtypes[nb].0,
+                    infallible,
+                    bindings,
+                    stack_size,
+                    depth,
+                )?;
+                let max_stack = (pat.1).1;
+                (Pattern::Inj(nb, Box::new(pat)), max_stack)
             }
         };
-        Ok((pat, annotation))
+        Ok((pat, (annotation, max_stack_size)))
     }
 
     /// bindings : let- and match-introduced variables
     /// local_types : types variables introduced by a polymorphic function
+    /// stack_size, depth : size of current stack
+    /// depth : number of parent functions
     fn check_expr(
         &self,
         (expr, annotation): (Expr<ParserStage>, <ParserStage as Annotation>::Expr),
-        bindings: &mut Scope<usize, (Type<TypeCheckStage>, GlobalLoc)>,
+        bindings: &mut Scope<usize, (Type<TypeCheckStage>, StackIdent)>,
+        stack_size: usize,
+        depth: usize,
         local_types: &'_ mut Scope<usize, (usize, GlobalLoc)>,
     ) -> Result<(Expr<TypeCheckStage>, <TypeCheckStage as Annotation>::Expr), Error> {
-        let (e, ty) = match expr {
-            Expr::Integer(n) => (Expr::Integer(n), Type::Int),
+        let (e, ty, used_var, max_stack_size) = match expr {
+            Expr::Integer(n) => (Expr::Integer(n), Type::Int, HashMap::new(), stack_size),
             Expr::Ident(id) => {
-                let (ty, _) = bindings.get(&id.name).cloned().ok_or(Error {
+                let (ty, id) = bindings.get(&id.name).cloned().ok_or(Error {
                     error_type: TypeError::UnknownVariable(id.name).into(),
                     loc: annotation,
                 })?;
 
                 if !matches!(ty, Type::OfCourse(_)) {
-                    bindings.remove(&id.name);
+                    bindings.remove(&id.real_name);
                 }
+                let mut used_var = HashMap::new();
+                used_var.insert(id, ty.clone());
 
-                (Expr::Ident(id), ty)
+                (Expr::Ident(id), ty, used_var, stack_size)
             }
             Expr::Param(e, params) => {
                 let params = params
                     .into_iter()
                     .map(|ty| self.check_type(ty, local_types))
                     .collect::<Result<Vec<_>, _>>()?;
-                let e = self.check_expr(*e, bindings, local_types)?;
-                let (mut ty, mut loc) = e.1.clone();
+                let e = self.check_expr(*e, bindings, stack_size, depth, local_types)?;
+                let (mut ty, mut loc, used_var, stack_size) = e.1.clone();
                 for _ in 0..params.len() {
                     let Type::Forall(_, tybis) = ty
                     else {
@@ -346,9 +405,15 @@ impl TypeChecker {
                     loc = tybis.1;
                 }
                 let ty = ty.real_specialize(params.iter().map(|(ty, _)| ty.clone()).collect(), 0);
-                (Expr::Param(Box::new(e), params), ty)
+                let max_stack_size = (e.1).3;
+                (
+                    Expr::Param(Box::new(e), params),
+                    ty,
+                    used_var,
+                    max_stack_size,
+                )
             }
-            Expr::Unit => (Expr::Unit, Type::Unit),
+            Expr::Unit => (Expr::Unit, Type::Unit, HashMap::new(), stack_size),
             Expr::Inj(ty, branch, e) => {
                 let (ty, ty_loc) = self.check_type(ty, local_types)?;
                 let Type::Sum(mut ty) = ty
@@ -365,7 +430,7 @@ impl TypeChecker {
                     });
                 }
 
-                let e = self.check_expr(*e, bindings, local_types)?;
+                let e = self.check_expr(*e, bindings, stack_size, depth, local_types)?;
                 if !(e.1).0.eq(&ty[branch].0, &self.known_types) {
                     return Err(Error {
                         error_type: TypeError::MismatchedType(ty.swap_remove(branch).0, (e.1).0)
@@ -373,9 +438,13 @@ impl TypeChecker {
                         loc: annotation,
                     });
                 }
+                let used_var = (e.1).2.clone();
+                let max_stack_size = (e.1).3;
                 (
                     Expr::Inj((Type::Sum(ty.clone()), ty_loc), branch, Box::new(e)),
                     Type::Sum(ty),
+                    used_var,
+                    max_stack_size,
                 )
             }
             Expr::Roll(ty, e) => {
@@ -386,7 +455,7 @@ impl TypeChecker {
                         loc: annotation,
                     });
                 }
-                let e = self.check_expr(*e, bindings, local_types)?;
+                let e = self.check_expr(*e, bindings, stack_size, depth, local_types)?;
                 let unrolled_ty = ty.clone().unroll();
                 if !unrolled_ty.eq(&(e.1).0, &self.known_types) {
                     return Err(Error {
@@ -394,10 +463,17 @@ impl TypeChecker {
                         loc: annotation,
                     });
                 }
-                (Expr::Roll((ty.clone(), ty_loc), Box::new(e)), ty)
+                let used_var = (e.1).2.clone();
+                let max_stack_size = (e.1).3;
+                (
+                    Expr::Roll((ty.clone(), ty_loc), Box::new(e)),
+                    ty,
+                    used_var,
+                    max_stack_size,
+                )
             }
             Expr::Unroll(e) => {
-                let e = self.check_expr(*e, bindings, local_types)?;
+                let e = self.check_expr(*e, bindings, stack_size, depth, local_types)?;
                 if !matches!((e.1).0, Type::Mu(_, _)) {
                     return Err(Error {
                         error_type: TypeError::NonUnrollableType((e.1).0).into(),
@@ -405,11 +481,18 @@ impl TypeChecker {
                     });
                 }
                 let unrolled_ty = (e.1).0.clone().unroll();
-                (Expr::Unroll(Box::new(e)), unrolled_ty)
+                let used_var = (e.1).2.clone();
+                let max_stack_size = (e.1).3;
+                (
+                    Expr::Unroll(Box::new(e)),
+                    unrolled_ty,
+                    used_var,
+                    max_stack_size,
+                )
             }
             Expr::App(e1, e2) => {
-                let e1 = self.check_expr(*e1, bindings, local_types)?;
-                let e2 = self.check_expr(*e2, bindings, local_types)?;
+                let e1 = self.check_expr(*e1, bindings, stack_size, depth, local_types)?;
+                let e2 = self.check_expr(*e2, bindings, stack_size, depth, local_types)?;
 
                 let Type::Impl(ty1, ty2) = (e1.1).0.clone()
                 else {
@@ -427,65 +510,123 @@ impl TypeChecker {
                         loc: (e2.1).1,
                     });
                 }
+                let mut used_var = (e1.1).2.clone();
+                used_var.extend((e2.1).2.clone());
+                let max_stack_size = (e1.1).3.max((e2.1).3);
 
-                (Expr::App(Box::new(e1), Box::new(e2)), ty2)
+                (
+                    Expr::App(Box::new(e1), Box::new(e2)),
+                    ty2,
+                    used_var,
+                    max_stack_size,
+                )
             }
             Expr::Let(pat, e1, e2) => {
-                let e1 = self.check_expr(*e1, bindings, local_types)?;
+                bindings.push_scope();
+                let e1 = self.check_expr(*e1, bindings, stack_size, depth, local_types)?;
+                let scope = bindings.pop_scope();
+                Self::assert_scope_clean(scope)?;
+                let mut used_var = (e1.1).2.clone();
 
                 let mut pat_bindings = HashMap::new();
-                let pat = self.check_pattern(pat, &(e1.1).0, true, &mut pat_bindings)?;
+                let pat =
+                    self.check_pattern(pat, &(e1.1).0, true, &mut pat_bindings, stack_size, depth)?;
 
-                for (var, (ty, loc)) in pat_bindings {
-                    Self::linear_insert(var, ty, loc, bindings)?;
+                let mut pat_vars = Vec::new();
+                for (_, (ty, var)) in pat_bindings {
+                    pat_vars.push(var);
+                    Self::linear_insert(var, ty, bindings)?;
                 }
 
-                let e2 = self.check_expr(*e2, bindings, local_types)?;
+                let e2 = self.check_expr(*e2, bindings, (pat.1).1, depth, local_types)?;
                 let ty = (e2.1).0.clone();
 
-                (Expr::Let(pat, Box::new(e1), Box::new(e2)), ty)
+                used_var.extend((e1.1).2.clone());
+                for var in pat_vars.iter() {
+                    used_var.remove(var);
+                }
+
+                let max_stack_size = (e1.1).3.max((e2.1).3);
+                (
+                    Expr::Let(pat, Box::new(e1), Box::new(e2)),
+                    ty,
+                    used_var,
+                    max_stack_size,
+                )
             }
             Expr::LetOfCourse(x, y, e) => {
-                let (ty, _) = bindings.get(&y.name).cloned().ok_or(Error {
+                let (ty, y) = bindings.get(&y.name).cloned().ok_or(Error {
                     error_type: TypeError::UnknownVariable(y.name).into(),
                     loc: y.loc,
                 })?;
                 let Type::OfCourse(ty) = ty
                 else {
                     return Err(Error {
-                        error_type: TypeError::DuplicateLinearExpression(y.name).into(),
+                        error_type: TypeError::DuplicateLinearExpression(y.real_name).into(),
                         loc: y.loc,
                     });
                 };
 
-                Self::linear_insert(x.name, ty.0, x.loc, bindings)?;
+                let x = StackIdent::new(stack_size, depth, x.name, x.loc);
+                Self::linear_insert(x, ty.0, bindings)?;
 
-                let e = self.check_expr(*e, bindings, local_types)?;
+                let e = self.check_expr(*e, bindings, stack_size + 1, depth, local_types)?;
                 let ty = (e.1).0.clone();
 
-                (Expr::LetOfCourse(x, y, Box::new(e)), ty)
+                let mut used_var = (e.1).2.clone();
+                used_var.remove(&x);
+
+                let e_ty = (e.1).0.clone();
+                let e_loc = (e.1).1;
+                let max_stack_size = (e.1).3;
+
+                used_var.insert(y, Type::OfCourse(Box::new((e_ty, e_loc))));
+
+                (
+                    Expr::LetOfCourse(x, y, Box::new(e)),
+                    ty,
+                    used_var,
+                    max_stack_size,
+                )
             }
             Expr::OfCourseLet(x, e1, e2) => {
                 bindings.push_scope();
                 bindings.lock();
-                let e1 = self.check_expr(*e1, bindings, local_types)?;
+                let e1 = self.check_expr(*e1, bindings, stack_size, depth, local_types)?;
                 bindings.unlock();
                 let scope = bindings.pop_scope();
 
                 Self::assert_scope_clean(scope)?;
 
+                let e1_ty = (e1.1).0.clone();
+                let e1_ty_loc = (e1.1).1;
+
+                let x = StackIdent::new(stack_size, depth, x.name, x.loc);
+
                 bindings.insert(
-                    x.name,
-                    (Type::OfCourse(Box::new(e1.1.clone())), x.loc),
+                    x.real_name,
+                    (Type::OfCourse(Box::new((e1_ty, e1_ty_loc))), x),
                     false,
                 );
 
-                let e2 = self.check_expr(*e2, bindings, local_types)?;
+                let e2 = self.check_expr(*e2, bindings, stack_size + 1, depth, local_types)?;
                 let ty = (e2.1).0.clone();
-                (Expr::OfCourseLet(x, Box::new(e1), Box::new(e2)), ty)
+
+                let mut used_var = (e1.1).2.clone();
+                used_var.extend((e2.1).2.clone());
+                used_var.remove(&x);
+
+                let max_stack_size = (e1.1).3.max((e2.1).3);
+
+                (
+                    Expr::OfCourseLet(x, Box::new(e1), Box::new(e2)),
+                    ty,
+                    used_var,
+                    max_stack_size,
+                )
             }
             Expr::Neg(e) => {
-                let e = self.check_expr(*e, bindings, local_types)?;
+                let e = self.check_expr(*e, bindings, stack_size, depth, local_types)?;
                 if !(e.1).0.eq(&Type::Int, &self.known_types) {
                     return Err(Error {
                         error_type: TypeError::MismatchedType(Type::Int, (e.1).0).into(),
@@ -493,10 +634,12 @@ impl TypeChecker {
                     });
                 }
 
-                (Expr::Neg(Box::new(e)), Type::Int)
+                let used_var = (e.1).2.clone();
+                let max_stack_size = (e.1).3;
+                (Expr::Neg(Box::new(e)), Type::Int, used_var, max_stack_size)
             }
             Expr::BinOp(op, e1, e2) => {
-                let e1 = self.check_expr(*e1, bindings, local_types)?;
+                let e1 = self.check_expr(*e1, bindings, stack_size, depth, local_types)?;
                 if !(e1.1).0.eq(&Type::Int, &self.known_types) {
                     return Err(Error {
                         error_type: TypeError::MismatchedType(Type::Int, (e1.1).0).into(),
@@ -504,7 +647,7 @@ impl TypeChecker {
                     });
                 }
 
-                let e2 = self.check_expr(*e2, bindings, local_types)?;
+                let e2 = self.check_expr(*e2, bindings, stack_size, depth, local_types)?;
                 if !(e2.1).0.eq(&Type::Int, &self.known_types) {
                     return Err(Error {
                         error_type: TypeError::MismatchedType(Type::Int, (e2.1).0).into(),
@@ -512,49 +655,64 @@ impl TypeChecker {
                     });
                 }
 
-                (Expr::BinOp(op, Box::new(e1), Box::new(e2)), Type::Int)
+                let mut used_var = (e1.1).2.clone();
+                used_var.extend((e2.1).2.clone());
+                let max_stack_size = (e1.1).3.max((e2.1).3);
+
+                (
+                    Expr::BinOp(op, Box::new(e1), Box::new(e2)),
+                    Type::Int,
+                    used_var,
+                    max_stack_size,
+                )
             }
             Expr::Fun(fun_def) => {
-                let fun_def = self.check_fun_def(*fun_def, bindings, local_types)?;
+                let fun_def = self.check_fun_def(*fun_def, bindings, depth, local_types)?;
                 let ty = (fun_def.1).0.clone();
-                (Expr::Fun(Box::new(fun_def)), ty)
+                let used_var = todo!("faut que je réfléchisse");
+                (Expr::Fun(Box::new(fun_def)), ty, used_var, stack_size + 1)
             }
             Expr::Match(e, branches) => {
-                let e = self.check_expr(*e, bindings, local_types)?;
+                bindings.push_scope();
+                let e = self.check_expr(*e, bindings, stack_size, depth, local_types)?;
+                let scope = bindings.pop_scope();
+                Self::assert_scope_clean(scope)?;
+
+                let mut used_var = (e.1).2.clone();
                 let mut common_ty = None;
-                let mut post_bindings = None;
+                let mut new_bindings = None;
+                let mut used_variables_in_branch: Option<HashMap<_, _>> = None;
                 let mut new_branches = Vec::new();
+                let mut max_stack = (e.1).3;
                 for branch in branches {
                     let (pat, e_branch) = branch;
                     let mut pat_bindings = HashMap::new();
 
-                    let pat = self.check_pattern(pat, &(e.1).0, false, &mut pat_bindings)?;
-
-                    for (var, (ty, loc)) in pat_bindings {
-                        Self::linear_insert(var, ty, loc, bindings)?;
-                    }
+                    let pat = self.check_pattern(
+                        pat,
+                        &(e.1).0,
+                        false,
+                        &mut pat_bindings,
+                        stack_size,
+                        depth,
+                    )?;
 
                     let mut match_bindings = bindings.clone();
+
+                    for (ty, var) in pat_bindings.values() {
+                        Self::linear_insert(*var, ty.clone(), &mut match_bindings)?;
+                    }
+
                     match_bindings.push_scope();
-                    let e_branch = self.check_expr(e_branch, &mut match_bindings, local_types)?;
-                    let match_bindings = match_bindings.pop_scope();
-                    if let Some(ref post_bindings) = post_bindings {
-                        // TODO: trouver si des variables sont utilisées dans certaines branches mais pas toutes
-                    } else {
-                        post_bindings = Some(match_bindings.clone());
-                    }
-                    for (name, ((ty, loc), linear)) in match_bindings {
-                        if linear {
-                            return Err(Error {
-                                error_type: TypeError::DiscardLinearExpr(
-                                    Pattern::Ident(ParseIdent { name, loc }),
-                                    ty,
-                                )
-                                .into(),
-                                loc,
-                            });
-                        }
-                    }
+                    let e_branch = self.check_expr(
+                        e_branch,
+                        &mut match_bindings,
+                        (pat.1).1,
+                        depth,
+                        local_types,
+                    )?;
+                    let scope = match_bindings.pop_scope();
+                    Self::assert_scope_clean(scope);
 
                     if let Some(ref common_ty) = common_ty {
                         if !(e_branch.1).0.eq(common_ty, &self.known_types) {
@@ -567,25 +725,87 @@ impl TypeChecker {
                     } else {
                         common_ty = Some((e_branch.1).0.clone());
                     }
+
+                    // check if all branch use the same variables
+                    // currently checking double inclusions with the first branch
+                    // TODO: chain inclusion check
+                    if let (Some(ref new_bindings), Some(ref used_variables_in_branch)) =
+                        (&new_bindings, &used_variables_in_branch)
+                    {
+                        for (var, ty) in &(e_branch.1).2 {
+                            if let Type::OfCourse(_) = ty {
+                                continue;
+                            }
+                            // FIXME: don't check for variables declared in the pattern
+                            if !used_variables_in_branch.contains_key(var) {
+                                return Err(Error {
+                                    error_type: TypeError::BranchDontConsume(
+                                        var.real_name,
+                                        var.loc,
+                                    )
+                                    .into(),
+                                    loc: (e_branch.1).1,
+                                });
+                            }
+                        }
+                        for (var, _) in used_variables_in_branch {
+                            // we don't check the type, as we removed all non-linear variables
+                            // from used_variables_in_branch
+                            if !(e_branch.1).2.contains_key(var) {
+                                return Err(Error {
+                                    error_type: TypeError::BranchDontConsume(
+                                        var.real_name,
+                                        var.loc,
+                                    )
+                                    .into(),
+                                    loc: (e_branch.1).1,
+                                });
+                            }
+                        }
+                    } else {
+                        new_bindings = Some(match_bindings);
+
+                        let mut tmp: HashMap<_, _> = (e_branch.1)
+                            .2
+                            .clone()
+                            .into_iter()
+                            .filter(|(_, ty)| !matches!(ty, Type::OfCourse(_)))
+                            .collect();
+                        for (_, (_, var)) in pat_bindings {
+                            tmp.remove(&var);
+                        }
+                        used_variables_in_branch = Some(tmp);
+                    }
+
+                    max_stack = max_stack.max((e_branch.1).3);
                     new_branches.push((pat, e_branch));
+                }
+
+                if let Some(used_variable_in_branch) = used_variables_in_branch {
+                    used_var.extend(used_variable_in_branch);
                 }
 
                 // TODO: check d'exhaustivité + vérification que les variables
                 // utilisée dans une branche le sont dans toutes les branches
-                (Expr::Match(Box::new(e), new_branches), common_ty.unwrap())
+                (
+                    Expr::Match(Box::new(e), new_branches),
+                    common_ty.unwrap(),
+                    used_var,
+                    0,
+                )
             }
         };
-        Ok((e, (ty, annotation)))
+        Ok((e, (ty, annotation, used_var, max_stack_size)))
     }
 
     fn assert_scope_clean(
-        scope: HashMap<usize, ((Type<TypeCheckStage>, GlobalLoc), bool)>,
+        scope: HashMap<usize, ((Type<TypeCheckStage>, StackIdent), bool)>,
     ) -> Result<(), Error> {
-        for (var, ((ty, loc), linear)) in scope {
+        for (var, ((ty, id), linear)) in scope {
             if linear {
                 return Err(Error {
                     error_type: TypeError::NonUsedLinearVar(var, ty).into(),
-                    loc,
+                    loc: id.loc,
                 });
             }
         }
@@ -593,29 +813,30 @@ impl TypeChecker {
     }
 
     fn linear_insert(
-        var: usize,
+        var: StackIdent,
         ty: Type<TypeCheckStage>,
-        loc: GlobalLoc,
-        bindings: &mut Scope<usize, (Type<TypeCheckStage>, GlobalLoc)>,
+        bindings: &mut Scope<usize, (Type<TypeCheckStage>, StackIdent)>,
     ) -> Result<(), Error> {
-        if let Some(((_, prev_loc), linear)) = bindings.remove(&var) {
+        if let Some(((_, prev_id), linear)) = bindings.remove(&var.real_name) {
             if linear {
                 return Err(Error {
-                    error_type: TypeError::MultipleBindingPattern(var, prev_loc).into(),
-                    loc,
+                    error_type: TypeError::MultipleBindingPattern(var.real_name, prev_id.loc)
+                        .into(),
+                    loc: var.loc,
                 });
             }
         }
 
         let linear = !matches!(ty, Type::OfCourse(_));
-        bindings.insert(var, (ty, loc), linear);
+        bindings.insert(var.real_name, (ty, var), linear);
         Ok(())
     }
 
     fn check_fun_def(
         &self,
         (fun_def, annotation): (FunDef<ParserStage>, <ParserStage as Annotation>::FunDef),
-        bindings: &mut Scope<usize, (Type<TypeCheckStage>, GlobalLoc)>,
+        bindings: &mut Scope<usize, (Type<TypeCheckStage>, StackIdent)>,
+        depth: usize,
         local_types: &'_ mut Scope<usize, (usize, GlobalLoc)>,
     ) -> Result<
         (
@@ -641,12 +862,13 @@ impl TypeChecker {
 
         let ret_ty = self.check_type(fun_def.ret_ty, local_types)?;
 
-        let mut arg_bindings = HashMap::new();
+        // let mut arg_bindings = HashMap::new();
         let mut patterns = Vec::with_capacity(fun_def.args.len());
         let mut types = Vec::with_capacity(fun_def.args.len());
         for (pat, ty) in fun_def.args {
             let ty = self.check_type(ty, local_types)?;
-            let pat = self.check_pattern(pat, &ty.0, true, &mut arg_bindings)?;
+            //let pat = self.check_pattern(pat, &ty.0, true, &mut arg_bindings)?;
+            let pat = todo!();
             patterns.push(pat);
             types.push(ty);
         }
@@ -658,17 +880,20 @@ impl TypeChecker {
 
         let args = patterns.into_iter().zip(types).collect();
 
-        if fun_def.rec {
-            Self::linear_insert(
-                fun_def.name.unwrap().name,
-                ty.0.clone(),
-                fun_def.name.unwrap().loc,
-                bindings,
-            )?;
-        }
+        let name = fun_def.name.unwrap();
+        let fun_def_name = StackIdent::new(0, depth, name.name, name.loc);
+
+        // we push the current function pointer at the top of the stack
+        // TODO: nop
+        let stack_size = if fun_def.rec {
+            Self::linear_insert(fun_def_name, ty.0.clone(), bindings)?;
+            1
+        } else {
+            0
+        };
 
         bindings.push_scope();
-        let body = self.check_expr(fun_def.body, bindings, local_types)?;
+        let body = self.check_expr(fun_def.body, bindings, stack_size, depth + 1, local_types)?;
         bindings.pop_scope();
 
         if !(body.1).0.eq(&ret_ty.0, &self.known_types) {
@@ -795,5 +1020,32 @@ impl Type<TypeCheckStage> {
         else { unreachable!() };
 
         ty.0.real_specialize(vec![this], 0)
+    }
+
+    /// Size, in bytes
+    fn size(&self) -> usize {
+        match self {
+            Type::Int => 8,
+            Type::Ident(absurd) => match *absurd {},
+            Type::TypeVar(_) => 8, // ptr
+            Type::Param(_, _, absurd) => match *absurd {},
+            Type::Unit => 0,
+            Type::Never => 0,
+            Type::OfCourse(ty) => ty.0.size(),
+            Type::Tuple(ty) => ty.iter().map(|ty| ty.0.size()).sum(),
+            Type::Sum(ty) => {
+                let nb = ty.len();
+                let max_size = ty.iter().map(|ty| ty.0.size()).max().unwrap();
+                let discrim_size = (usize::BITS - 1 - nb.leading_zeros()) as usize; // TODO: discrim_size.ilog2()
+                (if discrim_size & 8 == 0 {
+                    discrim_size
+                } else {
+                    discrim_size + 1
+                }) + max_size
+            }
+            Type::Impl(_, _) => 8, // ptr
+            Type::Mu(_, ty) => ty.0.size(),
+            Type::Forall(_, _) => unimplemented!(),
+        }
     }
 }

@@ -12,9 +12,9 @@ pub struct LLLParser<'a> {
     reverse_idents: HashMap<&'a str, usize>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ParseIdent {
-    /// index in a global table
+    /// index of the string in a global table
     pub name: usize,
     pub loc: GlobalLoc,
 }

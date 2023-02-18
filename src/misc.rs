@@ -5,7 +5,7 @@ pub use self::scope::Scope;
 #[derive(Debug, Clone, Copy)]
 pub enum Never {}
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Loc<T> {
     Pos(T),
     Span(T, T),
@@ -23,7 +23,7 @@ impl From<(usize, usize)> for Loc<(usize, usize)> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct GlobalLoc {
     pub pos: Loc<usize>,
     pub line_column: Loc<(usize, usize)>,
@@ -71,6 +71,7 @@ mod scope {
             self.parents.push(current);
         }
 
+        #[must_use]
         pub fn pop_scope(&mut self) -> HashMap<K, (V, bool)> {
             let cur = std::mem::take(&mut self.current);
             self.current = self.parents.pop().expect("Can't pop from empty stack");

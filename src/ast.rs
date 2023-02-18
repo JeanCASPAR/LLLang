@@ -46,7 +46,7 @@ pub enum BinOp {
 #[derive(Debug, Clone)]
 pub enum Expr<A: Annotation> {
     Integer(isize),
-    Ident(A::Ident),
+    Ident(A::EIdent),
     Param(Box<(Expr<A>, A::Expr)>, Vec<(Type<A>, A::Type)>),
     Unit,
     Inj((Type<A>, A::Type), usize, Box<(Expr<A>, A::Expr)>),
@@ -62,9 +62,9 @@ pub enum Expr<A: Annotation> {
         Box<(Expr<A>, A::Expr)>,
     ),
     /// let !x = y in e
-    LetOfCourse(A::Ident, A::Ident, Box<(Expr<A>, A::Expr)>),
+    LetOfCourse(A::EIdent, A::EIdent, Box<(Expr<A>, A::Expr)>),
     /// let x = !e in e
-    OfCourseLet(A::Ident, Box<(Expr<A>, A::Expr)>, Box<(Expr<A>, A::Expr)>),
+    OfCourseLet(A::EIdent, Box<(Expr<A>, A::Expr)>, Box<(Expr<A>, A::Expr)>),
     Neg(Box<(Expr<A>, A::Expr)>),
     BinOp(BinOp, Box<(Expr<A>, A::Expr)>, Box<(Expr<A>, A::Expr)>),
     Fun(Box<(FunDef<A>, A::FunDef)>),
@@ -78,7 +78,7 @@ pub enum Expr<A: Annotation> {
 pub enum Pattern<A: Annotation> {
     Discard,
     Int(isize),
-    Ident(A::Ident),
+    Ident(A::EIdent),
     Unit,
     Tuple(Vec<(Pattern<A>, A::Pattern)>),
     Inj(usize, Box<(Pattern<A>, A::Pattern)>),

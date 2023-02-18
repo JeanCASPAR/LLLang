@@ -6,3 +6,4 @@ Y a des pb dans le tc, je gère mal les alias
 (de toute façon je veux du hash-consing à la fin)
 Pattern-matching correct (exhaustivité, vérification linéaires)
 Les variables linéaires sont encore gérées avec les pieds
+`used_var` en paramètre dans `check_expr`

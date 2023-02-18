@@ -98,4 +98,7 @@ pub enum TypeError {
     NonParametableType(Type<TypeCheckStage>),
     NonUsedLinearVar(usize, Type<TypeCheckStage>),
     DuplicateTypeParameter,
+    /// Name of the variable, position of declaration
+    /// Used when branch consume a variable that other don't consume
+    BranchDontConsume(usize, GlobalLoc),
 }
