@@ -678,9 +678,13 @@ impl TypeChecker {
 
                 let mut used_var = (e.1).2.clone();
                 let mut common_ty = None;
-                let mut used_variables_in_branch: Option<HashMap<_, _>> = None;
                 let mut new_branches = Vec::new();
                 let mut max_stack = (e.1).3;
+
+                let mut used_var_in_first_branch = None;
+                let mut used_var_in_last_branch: Option<HashMap<_, _>> = None;
+                let mut first_branch_loc = None;
+                let mut nonlinear_var = HashMap::new();
                 for branch in branches {
                     let (pat, e_branch) = branch;
                     let mut pat_bindings = HashMap::new();
@@ -724,28 +728,17 @@ impl TypeChecker {
                     }
 
                     // check if all branch use the same variables
-                    // currently checking double inclusions with the first branch
-                    // TODO: chain inclusion check
-                    if let Some(ref used_variables_in_branch) = used_variables_in_branch {
-                        for (var, ty) in &(e_branch.1).2 {
+                    // we check cyclic inclusion, be checking if the variables
+                    // of the last visited one are included in the current one
+                    if let Some(ref mut used_var_in_last_branch) = used_var_in_last_branch {
+                        let mut used_var =
+                            HashMap::with_capacity(used_var_in_last_branch.capacity());
+                        // inclusion check
+                        for (var, ty) in used_var_in_last_branch.iter() {
                             if let Type::OfCourse(_) = ty {
+                                nonlinear_var.insert(*var, ty.clone());
                                 continue;
                             }
-                            // FIXME: don't check for variables declared in the pattern
-                            if !used_variables_in_branch.contains_key(var) {
-                                return Err(Error {
-                                    error_type: TypeError::BranchDontConsume(
-                                        var.real_name,
-                                        var.loc,
-                                    )
-                                    .into(),
-                                    loc: (e_branch.1).1,
-                                });
-                            }
-                        }
-                        for (var, _) in used_variables_in_branch {
-                            // we don't check the type, as we removed all non-linear variables
-                            // from used_variables_in_branch
                             if !(e_branch.1).2.contains_key(var) {
                                 return Err(Error {
                                     error_type: TypeError::BranchDontConsume(
@@ -757,29 +750,55 @@ impl TypeChecker {
                                 });
                             }
                         }
+                        // update the variables
+                        for (var, ty) in &(e_branch.1).2 {
+                            if let Type::OfCourse(_) = ty {
+                                continue;
+                            }
+                            used_var.insert(*var, ty.clone());
+                        }
+                        for (_, (_, var)) in pat_bindings {
+                            used_var.remove(&var);
+                        }
+                        *used_var_in_last_branch = used_var;
                     } else {
-                        let mut tmp: HashMap<_, _> = (e_branch.1)
-                            .2
-                            .clone()
-                            .into_iter()
-                            .filter(|(_, ty)| !matches!(ty, Type::OfCourse(_)))
-                            .collect();
+                        let mut tmp = (e_branch.1).2.clone();
                         for (_, (_, var)) in pat_bindings {
                             tmp.remove(&var);
                         }
-                        used_variables_in_branch = Some(tmp);
+                        used_var_in_first_branch = Some(tmp.clone());
+                        used_var_in_last_branch = Some(tmp);
+                        first_branch_loc = Some((e_branch.1).1);
                     }
 
                     max_stack = max_stack.max((e_branch.1).3);
                     new_branches.push((pat, e_branch));
                 }
 
-                if let Some(used_variable_in_branch) = used_variables_in_branch {
-                    used_var.extend(used_variable_in_branch);
+                // cyclic inclusion
+                if let (Some(first_branch), Some(last_branch), Some(first_branch_loc)) = (
+                    used_var_in_first_branch,
+                    used_var_in_last_branch,
+                    first_branch_loc,
+                ) {
+                    for (var, ty) in last_branch {
+                        if let Type::OfCourse(_) = ty {
+                            nonlinear_var.insert(var, ty.clone());
+                            continue;
+                        }
+                        if !first_branch.contains_key(&var) {
+                            return Err(Error {
+                                error_type: TypeError::BranchDontConsume(var.real_name, var.loc)
+                                    .into(),
+                                loc: first_branch_loc,
+                            });
+                        }
+                    }
+                    used_var.extend(first_branch);
+                    used_var.extend(nonlinear_var);
                 }
 
-                // TODO: check d'exhaustivité + vérification que les variables
-                // utilisée dans une branche le sont dans toutes les branches
+                // TODO: check d'exhaustivité
                 (
                     Expr::Match(Box::new(e), new_branches),
                     common_ty.unwrap(),
@@ -897,7 +916,7 @@ impl TypeChecker {
         }
 
         for _ in 0..fun_def.ty_var.len() {
-            local_types.pop_scope();
+            let _ = local_types.pop_scope();
         }
 
         let fun_def = FunDef {
