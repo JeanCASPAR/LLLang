@@ -78,8 +78,9 @@ impl Annotation for TypeCheckStage {
         // max stack size (in number of variables)
         usize,
     );
-    // max stack size
-    type Pattern = (GlobalLoc, usize);
+    // type, max stack size
+    type Pattern = (GlobalLoc, Type<TypeCheckStage>, usize);
+    type UnitPat = Never;
     type Type = GlobalLoc;
     type FunDef = (Type<TypeCheckStage>, GlobalLoc);
     type Item = GlobalLoc;
@@ -263,7 +264,7 @@ impl TypeChecker {
 
                 (Pattern::Ident(stack_id), stack_size + 1)
             }
-            Pattern::Unit => {
+            Pattern::Unit(()) => {
                 if !matches!(expected_type, Type::Unit) {
                     return Err(Error {
                         error_type: TypeError::NonCompatibleType(pattern, expected_type.clone())
@@ -271,7 +272,7 @@ impl TypeChecker {
                         loc: annotation,
                     });
                 }
-                (Pattern::Unit, stack_size)
+                (Pattern::Tuple(Vec::new()), stack_size)
             }
             Pattern::Tuple(subpatterns) => {
                 let subtypes = if let Type::Tuple(subtypes) = expected_type {
@@ -307,7 +308,7 @@ impl TypeChecker {
                         max_stack_size,
                         depth,
                     )?;
-                    max_stack_size = annot.1;
+                    max_stack_size = annot.2;
                     new_subpatterns.push((subpat, annot));
                 }
                 (Pattern::Tuple(new_subpatterns), max_stack_size)
@@ -353,11 +354,11 @@ impl TypeChecker {
                     stack_size,
                     depth,
                 )?;
-                let max_stack = (pat.1).1;
+                let max_stack = (pat.1).2;
                 (Pattern::Inj(nb, Box::new(pat)), max_stack)
             }
         };
-        Ok((pat, (annotation, max_stack_size)))
+        Ok((pat, (annotation, expected_type.clone(), max_stack_size)))
     }
 
     /// bindings : let- and match-introduced variables
@@ -536,7 +537,7 @@ impl TypeChecker {
                     Self::linear_insert(var, ty, bindings)?;
                 }
 
-                let e2 = self.check_expr(*e2, bindings, (pat.1).1, depth, local_types)?;
+                let e2 = self.check_expr(*e2, bindings, (pat.1).2, depth, local_types)?;
                 let ty = (e2.1).0.clone();
 
                 used_var.extend((e1.1).2.clone());
@@ -708,7 +709,7 @@ impl TypeChecker {
                     let e_branch = self.check_expr(
                         e_branch,
                         &mut match_bindings,
-                        (pat.1).1,
+                        (pat.1).2,
                         depth,
                         local_types,
                     )?;
@@ -798,12 +799,14 @@ impl TypeChecker {
                     used_var.extend(nonlinear_var);
                 }
 
-                // TODO: check d'exhaustivité
+                let patterns: Vec<_> = new_branches.iter().map(|(pat, _)| pat).cloned().collect();
+                Self::assert_pattern_matching_exhaustive(patterns, annotation, (e.1).0.clone())?;
+
                 (
                     Expr::Match(Box::new(e), new_branches),
                     common_ty.unwrap(),
                     used_var,
-                    0,
+                    max_stack,
                 )
             }
         };
@@ -931,8 +934,220 @@ impl TypeChecker {
         Ok((fun_def, (ty.0, annotation)))
     }
 
-    fn is_pattern_matching_exhaustive(_patterns: &[Pattern<TypeCheckStage>]) -> bool {
-        todo!()
+    fn assert_pattern_matching_exhaustive(
+        patterns: Vec<(
+            Pattern<TypeCheckStage>,
+            <TypeCheckStage as Annotation>::Pattern,
+        )>,
+        loc: GlobalLoc,
+        ty: Type<TypeCheckStage>,
+    ) -> Result<(), Error> {
+        Self::usefull(
+            patterns.into_iter().map(|p| vec![p]).collect(),
+            // TODO: the stack size is not needed but it'll be a pain to remove it every where now
+            vec![(Pattern::Discard, (loc, ty, 0))],
+        )
+    }
+
+    // TODO: matrix = Vec of size m x n instead of Vec<Vec<_>>
+    /// matrix : patrix of patterns, m x n
+    /// m : number of patterns
+    /// n : arity of the tuple
+    /// Explanation of the algorithm : [http://moscova.inria.fr/~maranget/papers/warn/index.html](http://moscova.inria.fr/~maranget/papers/warn/index.html)
+    fn usefull(
+        matrix: Vec<
+            Vec<(
+                Pattern<TypeCheckStage>,
+                <TypeCheckStage as Annotation>::Pattern,
+            )>,
+        >,
+        mut pat: Vec<(
+            Pattern<TypeCheckStage>,
+            <TypeCheckStage as Annotation>::Pattern,
+        )>,
+    ) -> Result<(), Error> {
+        let m = matrix.len();
+        let n = pat.len();
+
+        if m == 0 {
+            return Ok(());
+        }
+
+        if n == 0 {
+            // then pattern is of type unit, and there is multiple lines
+            return Err(Error {
+                error_type: TypeError::PatternMatchTwiced(Pattern::Tuple(Vec::new()), (pat[0].1).0)
+                    .into(),
+                loc: (matrix[0][0].1).0,
+            });
+        }
+
+        // unreachable!() is safe because of the well-typedness of the matrix
+        let p = pat.pop().unwrap();
+        match p.0 {
+            Pattern::Discard | Pattern::Ident(_) => match (p.1).1 {
+                Type::Sum(v) => {
+                    let n = v.len();
+                    let mut specialized_matrices = Vec::new();
+                    for _ in 0..n {
+                        specialized_matrices.push(Vec::new());
+                    }
+                    for mut line in matrix {
+                        let current_cell = line.pop().unwrap();
+                        match current_cell.0 {
+                            Pattern::Discard | Pattern::Ident(_) => {
+                                return Err(Error {
+                                    error_type: TypeError::PatternMatchTwiced(
+                                        current_cell.0,
+                                        (current_cell.1).0,
+                                    )
+                                    .into(),
+                                    loc: (p.1).0,
+                                })
+                            }
+                            Pattern::Int(_) | Pattern::Unit(_) | Pattern::Tuple(_) => {
+                                unreachable!()
+                            }
+                            Pattern::Inj(j, p) => {
+                                line.push(*p);
+                                specialized_matrices[j].push(line);
+                            }
+                        }
+                    }
+                    specialized_matrices
+                        .into_iter()
+                        .map(|mat| Self::usefull(mat, pat.clone()))
+                        .collect()
+                }
+                Type::Tuple(v) => {
+                    let mut specialized_matrix = Vec::new();
+                    for mut line in matrix {
+                        let current_cell = line.pop().unwrap();
+                        match current_cell.0 {
+                            Pattern::Discard | Pattern::Ident(_) => {
+                                return Err(Error {
+                                    error_type: TypeError::PatternMatchTwiced(
+                                        current_cell.0,
+                                        (current_cell.1).0,
+                                    )
+                                    .into(),
+                                    loc: (p.1).0,
+                                })
+                            }
+                            Pattern::Int(_) | Pattern::Unit(_) | Pattern::Inj(_, _) => {
+                                unreachable!()
+                            }
+                            Pattern::Tuple(mut v) => {
+                                line.append(&mut v);
+                                specialized_matrix.push(line);
+                            }
+                        }
+                    }
+                    let loc = (p.1).0;
+                    let max_stack_size = (p.1).2;
+                    for ty in v {
+                        pat.push((Pattern::Discard, (loc, ty.0, max_stack_size)));
+                    }
+                    Self::usefull(specialized_matrix, pat)
+                }
+                // type for whom there can't be exhaustive pattern matching by enumerating constructors :
+                // int, function, etc.
+                _ => {
+                    let mut specialized_matrix = Vec::new();
+                    for mut line in matrix {
+                        let current_cell = line.pop().unwrap();
+                        match current_cell.0 {
+                            Pattern::Discard | Pattern::Ident(_) => {
+                                return Err(Error {
+                                    error_type: TypeError::PatternMatchTwiced(
+                                        current_cell.0,
+                                        (current_cell.1).0,
+                                    )
+                                    .into(),
+                                    loc: (p.1).0,
+                                })
+                            }
+                            _ => {
+                                specialized_matrix.push(line);
+                            }
+                        }
+                    }
+                    Self::usefull(specialized_matrix, pat)
+                }
+            },
+            Pattern::Int(n) => {
+                let mut specialized_matrix = Vec::new();
+                for mut line in matrix {
+                    let current_cell = line.pop().unwrap();
+                    match current_cell.0 {
+                        Pattern::Discard | Pattern::Ident(_) => {
+                            return Err(Error {
+                                error_type: TypeError::PatternMatchTwiced(
+                                    current_cell.0,
+                                    (current_cell.1).0,
+                                )
+                                .into(),
+                                loc: (p.1).0,
+                            })
+                        }
+                        Pattern::Unit(_) | Pattern::Tuple(_) | Pattern::Inj(_, _) => unreachable!(),
+                        Pattern::Int(m) => {
+                            if m == n {
+                                return Err(Error {
+                                    error_type: TypeError::PatternMatchTwiced(
+                                        current_cell.0,
+                                        (current_cell.1).0,
+                                    )
+                                    .into(),
+                                    loc: (p.1).0,
+                                });
+                            }
+                            specialized_matrix.push(line);
+                        }
+                    }
+                }
+                Self::usefull(specialized_matrix, pat)
+            }
+            Pattern::Unit(absurd) => match absurd {},
+            Pattern::Tuple(q) => {
+                let mut specialized_matrix = Vec::new();
+                for mut line in matrix {
+                    let current_cell = line.pop().unwrap();
+                    match current_cell.0 {
+                        Pattern::Discard | Pattern::Ident(_) => specialized_matrix.push(line),
+                        Pattern::Unit(absurd) => match absurd {},
+                        Pattern::Tuple(v) => {
+                            for p in v {
+                                line.push(p);
+                            }
+                            specialized_matrix.push(line);
+                        }
+                        Pattern::Int(_) | Pattern::Inj(_, _) => unreachable!(),
+                    }
+                }
+                for p in q {
+                    pat.push(p);
+                }
+                Self::usefull(specialized_matrix, pat)
+            }
+            Pattern::Inj(i, q) => {
+                let mut specialized_matrix = Vec::new();
+                for line in matrix {
+                    let current_cell = &mut line.last().unwrap();
+                    match &current_cell.0 {
+                        Pattern::Discard | Pattern::Ident(_) => specialized_matrix.push(line),
+                        Pattern::Int(_) | Pattern::Unit(_) | Pattern::Tuple(_) => unreachable!(),
+                        Pattern::Inj(j, p) if i == *j => {
+                            *current_cell = p;
+                            specialized_matrix.push(line);
+                        }
+                        Pattern::Inj(_, _) => (),
+                    }
+                }
+                pat.push(*q);
+                Self::usefull(specialized_matrix, pat)
+            }
+        }
     }
 }
 

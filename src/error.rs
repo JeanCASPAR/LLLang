@@ -101,4 +101,6 @@ pub enum TypeError {
     /// Name of the variable, position of declaration
     /// Used when branch consume a variable that other don't consume
     BranchDontConsume(usize, GlobalLoc),
+    /// Pattern that is matched twice, position of the first match
+    PatternMatchTwiced(Pattern<TypeCheckStage>, GlobalLoc),
 }

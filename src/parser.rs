@@ -37,6 +37,7 @@ impl Annotation for ParserStage {
     type TypeParam = ();
     type Expr = GlobalLoc;
     type Pattern = GlobalLoc;
+    type UnitPat = ();
     type Type = GlobalLoc;
     type FunDef = GlobalLoc;
     type Item = GlobalLoc;
@@ -369,7 +370,7 @@ impl<'a> LLLParser<'a> {
                     GlobalLoc::new(span, line_column),
                 ))
             }
-            Rule::pat_unit => Ok((Pattern::Unit, GlobalLoc::new(span, line_column))),
+            Rule::pat_unit => Ok((Pattern::Unit(()), GlobalLoc::new(span, line_column))),
             Rule::pat_tuple => {
                 let pairs = parsed.into_inner();
                 let params = pairs

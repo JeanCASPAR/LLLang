@@ -10,6 +10,7 @@ pub trait Annotation {
     type TypeParam: Debug + Clone;
     type Expr: Debug + Clone;
     type Pattern: Debug + Clone;
+    type UnitPat: Debug + Clone;
     type Type: Debug + Clone;
     type FunDef: Debug + Clone;
     type Item: Debug + Clone;
@@ -79,7 +80,7 @@ pub enum Pattern<A: Annotation> {
     Discard,
     Int(isize),
     Ident(A::EIdent),
-    Unit,
+    Unit(A::UnitPat),
     Tuple(Vec<(Pattern<A>, A::Pattern)>),
     Inj(usize, Box<(Pattern<A>, A::Pattern)>),
 }
